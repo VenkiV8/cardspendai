@@ -36,6 +36,8 @@ export interface InstantOffer {
   maxDiscount?: number;
   minTxn: number;
   funding: string;
+  /** Provenance shown in the UI. All offers in this prototype are illustrative demo data. */
+  sourceNote: string;
 }
 
 export interface CardDefinition {
@@ -83,13 +85,17 @@ export interface CardLive {
 
 export type LiveCards = Record<CardId, CardLive>;
 
+/** Every instant offer in this prototype is illustrative, not a live issuer offer. */
+export const DEMO_OFFER_NOTE = 'Demo offer data • modelled on public Paytm × issuer promo formats, not a live AU Bank offer';
+
 export const USER = {
   name: 'Arjun Mehta',
   firstName: 'Arjun',
   persona: 'Multi-Card Pragmatist',
   city: 'Bengaluru',
   upiId: 'arjunmehta@pthdfc',
-  alias: 'arjun.mehta@cardsense.paytm.com',
+  /** Opaque random id — a name-based alias would leak identity (deck slide 5). */
+  alias: 'u8f3k2@cardsense.paytm.com',
 };
 
 /** Demo "today": Friday, 27 March 2026 — 4 days before the Diners quarter closes. */
@@ -237,6 +243,7 @@ export const CARDS: Record<CardId, CardDefinition> = {
         maxDiscount: 5000,
         minTxn: 10000,
         funding: 'Issuer-funded (AU Bank × Paytm Travel)',
+        sourceNote: DEMO_OFFER_NOTE,
       },
       {
         id: 'auBill150',
@@ -247,6 +254,7 @@ export const CARDS: Record<CardId, CardDefinition> = {
         value: 150,
         minTxn: 1000,
         funding: 'Issuer-funded (AU Bank × Paytm BBPS)',
+        sourceNote: DEMO_OFFER_NOTE,
       },
     ],
     channels: ['bbps', 'paytmFlights', 'paytmMovies', 'pos'],

@@ -44,6 +44,12 @@ export interface RagContext {
   bankBalance: number;
   billPaid: boolean;
   aaConnected: boolean;
+  /** From getSafeToSpend(): null when AA is revoked. */
+  safeToSpend: number | null;
+  /** Unpaid billed statement dues visible via BBPS. */
+  billedDue: number;
+  /** Unbilled spends visible to CardSense (excludes sources whose consent is revoked). */
+  unbilledSeen: number;
 }
 
 export const STARTER_PROMPTS = [
@@ -159,7 +165,7 @@ export function answerQuery(query: string, ctx: RagContext): RagResponse {
           'Neutrality check: ranking weight for co-branded cards = 0.00',
         ],
         citations: [
-          { source: 'AU Bank × Paytm Flights offer T&C', clause: '12% up to ₹5,000, min txn ₹10,000', effective: 'Valid till 30 Apr 2026' },
+          { source: 'AU Bank × Paytm Flights offer T&C (demo offer data)', clause: '12% up to ₹5,000, min txn ₹10,000 • illustrative, not a live AU Bank offer', effective: 'Demo' },
           { source: CARDS.hdfcSelect.mitc, clause: 'Sch. B — 5% Travel/Movies, ₹1,000 cap / calendar month', effective: '1 Jan 2026' },
         ],
         action: { label: 'Open Paytm Flights checkout', tab: 'checkout', scenario: 'C' },
@@ -271,7 +277,7 @@ export function answerQuery(query: string, ctx: RagContext): RagResponse {
         intent: 'route.utility',
         title: `Paying a ${formatINR(amount)} utility bill (MCC 4900)`,
         verdict: { tone: 'good', text: `Use ${bestLabel} → ${formatINR(bestValue)} value` },
-        answer: `Scapia earns 0% on Utilities (MCC 4900). Paytm HDFC Select has only ${formatINR(cap.remaining)} left in its 3% calendar-month cap (≈${formatINR(cap.remainingSpend)} of spend) before falling to 1%. The AU Bank flat ₹150 BBPS coupon often wins on bills under ~₹15,000.`,
+        answer: `Scapia earns 0% on Utilities (MCC 4900). Paytm HDFC Select has only ${formatINR(cap.remaining)} left in its 3% calendar-month cap (≈${formatINR(cap.remainingSpend)} of spend) before falling to 1%. The AU Bank flat ₹150 BBPS coupon (demo offer data) often wins on bills under ~₹15,000.`,
         facts,
         bullets: [`HDFC 3% cap saturates at ${formatINR(cap.saturationSpend)} spend per calendar month`],
         citations: [
@@ -337,17 +343,19 @@ export function answerQuery(query: string, ctx: RagContext): RagResponse {
       };
     }
     case 'safe': {
-      const liability = totalLiability(cards);
+      const blindUnbilled = totalLiability(cards) - ctx.unbilledSeen;
       return {
         intent: 'portfolio.safe_to_spend',
         title: 'Your Safe-to-Spend balance',
-        verdict: ctx.aaConnected ? { tone: 'info', text: `${formatINR(ctx.bankBalance - liability)} safe to spend` } : { tone: 'warn', text: 'AA consent revoked — balance unavailable' },
-        answer: 'Safe-to-Spend = AA-linked savings balance minus all unbilled credit card and RuPay-on-UPI spends. It prevents the "my bank balance looks fine" trap that leads to revolving at ~42% p.a.',
+        verdict: ctx.safeToSpend !== null ? { tone: ctx.safeToSpend < 0 ? 'bad' : 'info', text: `${formatINR(ctx.safeToSpend)} safe to spend` } : { tone: 'warn', text: 'AA consent revoked: balance unavailable' },
+        answer:
+          'Safe-to-Spend = AA-linked savings balance − unbilled credit card & RuPay-on-UPI spends − unpaid billed statements. It prevents the "my bank balance looks fine" trap that leads to revolving at ~42% p.a.',
         facts: [
           { label: `${SAVINGS_ACCOUNT.bank} ${SAVINGS_ACCOUNT.masked}`, value: ctx.aaConnected ? formatINR(ctx.bankBalance) : 'Hidden' },
-          { label: 'Unbilled card liability', value: formatINR(liability), tone: 'bad' },
+          { label: 'Unbilled card spends', value: `−${formatINR(ctx.unbilledSeen)}`, tone: 'bad' },
+          { label: 'Unpaid billed dues (BBPS)', value: ctx.billedDue > 0 ? `−${formatINR(ctx.billedDue)}` : '₹0', tone: ctx.billedDue > 0 ? 'warn' : 'good' },
         ],
-        bullets: [],
+        bullets: blindUnbilled > 0 ? [`SMS sandbox is revoked, so ${formatINR(blindUnbilled)} of RuPay-on-UPI spends isn't counted. The figure is overstated.`] : [],
         citations: [{ source: 'RBI Account Aggregator Master Direction (NBFC-AA)', clause: 'Consent-based CASA data sharing', effective: '2016 (amended 2023)' }],
         action: { label: 'View breakdown', tab: 'overview' },
         retrievalMs,
@@ -426,9 +434,9 @@ export function answerQuery(query: string, ctx: RagContext): RagResponse {
     default:
       return {
         intent: 'fallback.clarify',
-        title: "I couldn't match that to a card rule yet",
-        verdict: { tone: 'info', text: 'Try asking about a spend, a cap, a milestone or a bill' },
-        answer: 'I answer only from your issuers\' MITC documents, RBI/NPCI rules and your live card state, so I won\'t guess. Try one of these:',
+        title: 'I can only answer from MITCs',
+        verdict: { tone: 'info', text: 'No matching MITC clause found, so no guess' },
+        answer: 'I can only answer from your issuers\' MITC documents, RBI/NPCI rules and your live card state. I couldn\'t find a clause that matches this question, so I won\'t guess. Try one of these:',
         facts: [],
         bullets: [
           'Which card for a ₹6,000 electricity bill?',

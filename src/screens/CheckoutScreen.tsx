@@ -13,11 +13,13 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { Badge, Card, CardArt, PrimaryButton, Sheet } from '../components/ui';
-import { CARDS, SCENARIOS, SCENARIO_ORDER, type InstrumentId, type ScenarioId } from '../data/cardsData';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useTourTarget } from '../components/Tour';
+import { Badge, Card, CardArt, PHONE_PORTAL_ID, PrimaryButton, Sheet } from '../components/ui';
+import { CARDS, DEMO_OFFER_NOTE, SCENARIOS, SCENARIO_ORDER, type InstrumentId, type ScenarioId } from '../data/cardsData';
 import { formatINR } from '../lib/format';
-import { evaluate, routeTransaction, type Note, type RouteResult } from '../lib/routingEngine';
+import { INSTRUMENT_COUNT_LABEL, evaluate, formatMs, routeTransaction, type Note, type RouteResult } from '../lib/routingEngine';
 import { sessionSaved, useApp } from '../state/appState';
 
 const SCENARIO_ICON: Record<ScenarioId, typeof Zap> = { A: Zap, B: ScanLine, C: Plane };
@@ -37,8 +39,21 @@ export function CheckoutScreen() {
   const [paying, setPaying] = useState(false);
   const [receipt, setReceipt] = useState<RouteResult | null>(null);
   const [picker, setPicker] = useState(false);
+  const [delta, setDelta] = useState<{ key: number; amount: number } | null>(null);
+  const deltaTimer = useRef<number | undefined>(undefined);
+  const switchTour = useTourTarget('switch');
 
-  const apply = (r: RouteResult) => dispatch({ type: 'APPLY_SWITCH', scenario: sc.id, result: r });
+  useEffect(() => () => window.clearTimeout(deltaTimer.current), []);
+
+  const apply = (r: RouteResult) => {
+    const gain = r.totalValue - selected.totalValue;
+    dispatch({ type: 'APPLY_SWITCH', scenario: sc.id, result: r });
+    if (gain > 0.5) {
+      window.clearTimeout(deltaTimer.current);
+      setDelta({ key: Date.now(), amount: gain });
+      deltaTimer.current = window.setTimeout(() => setDelta(null), 2200);
+    }
+  };
 
   const pay = () => {
     setPaying(true);
@@ -55,7 +70,8 @@ export function CheckoutScreen() {
   return (
     <div className="space-y-4 px-4 pb-6 pt-4">
       {/* Session counter */}
-      <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-[#16A34A] to-[#22C55E] px-4 py-3 text-white shadow-sm">
+      <div className="relative flex items-center justify-between rounded-2xl bg-gradient-to-r from-[#16A34A] to-[#22C55E] px-4 py-3 text-white shadow-sm">
+        {delta && <DeltaChip key={delta.key} amount={delta.amount} />}
         <div className="flex items-center gap-2">
           <TrendingUp size={18} />
           <div>
@@ -68,8 +84,8 @@ export function CheckoutScreen() {
         <span className="shrink-0 whitespace-nowrap rounded-full bg-white/20 px-2 py-1 text-[10px] font-bold">via CardSense</span>
       </div>
 
-      {/* Scenario pills */}
-      <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
+      {/* Scenario segmented control: three equal segments, nothing clips */}
+      <div role="tablist" aria-label="Checkout scenario" className="grid grid-cols-3 gap-1 rounded-2xl bg-white p-1 shadow-[inset_0_0_0_1px_#E2E8F0]">
         {SCENARIO_ORDER.map((id) => {
           const s = SCENARIOS[id];
           const I = SCENARIO_ICON[id];
@@ -77,14 +93,16 @@ export function CheckoutScreen() {
           return (
             <button
               key={id}
+              role="tab"
+              aria-selected={active}
               onClick={() => dispatch({ type: 'SET_SCENARIO', scenario: id })}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11.5px] font-bold transition ${
-                active ? 'border-[#00B9F1] bg-[#00B9F1] text-white shadow-sm' : 'border-[#E2E8F0] bg-white text-[#002E6E] hover:border-[#00B9F1]/50'
-              }`}
+              className={`flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition ${active ? 'bg-[#002E6E] text-white shadow-sm' : 'text-[#002E6E] hover:bg-[#F4F7FA]'}`}
             >
-              <I size={13} />
-              {id}: {s.pill}
-              {state.paid[id] && <CheckCircle2 size={12} />}
+              <span className="flex items-center gap-1 text-[11px] font-extrabold">
+                <I size={12} className={active ? 'text-[#00B9F1]' : 'text-[#0089B3]'} /> {id}
+                {state.paid[id] && <CheckCircle2 size={11} className="text-[#16A34A]" />}
+              </span>
+              <span className={`w-full truncate text-center text-[10px] font-semibold ${active ? 'text-white/80' : 'text-slate-500'}`}>{s.pill}</span>
             </button>
           );
         })}
@@ -132,7 +150,7 @@ export function CheckoutScreen() {
                   <Sparkles size={13} className="text-[#00B9F1]" /> CardSense Pre-Swipe Check
                 </p>
                 <span className="flex items-center gap-1 rounded-full bg-[#002E6E] px-2 py-0.5 text-[9.5px] font-bold text-white">
-                  <Cpu size={10} /> {decision.latencyMs}ms deterministic match
+                  <Cpu size={10} /> {formatMs(decision.computeMs)} on-device match
                 </span>
               </div>
 
@@ -158,7 +176,9 @@ export function CheckoutScreen() {
               {recommendations.length > 0 && (
                 <div className="mt-3 space-y-2">
                   {recommendations.map((r, i) => (
-                    <RecommendationCard key={r.instrument} rank={i + 1} result={r} baseline={selected.totalValue} onApply={() => apply(r)} />
+                    <div key={r.instrument} ref={i === 0 ? switchTour.ref : undefined} className={i === 0 ? switchTour.className : ''}>
+                      <RecommendationCard rank={i + 1} result={r} baseline={selected.totalValue} onApply={() => apply(r)} />
+                    </div>
                   ))}
                 </div>
               )}
@@ -173,13 +193,32 @@ export function CheckoutScreen() {
             <div className="my-1.5 border-t border-dashed border-slate-300" />
             <SummaryRow k="Total payable" v={formatINR(selected.payable)} bold />
             <details className="mt-1.5 text-[10.5px] text-slate-500">
-              <summary className="cursor-pointer font-semibold text-[#0089B3]">Show rule-engine math</summary>
+              <summary className="cursor-pointer font-semibold text-[#0089B3]">Why this card? (rule-engine math)</summary>
               <ul className="mt-1 space-y-0.5 pl-1">
                 {selected.lines.map((l) => (
                   <li key={l}>• {l}</li>
                 ))}
               </ul>
+              <p className="mt-2 font-bold uppercase tracking-wide text-slate-400">
+                {decision.results.length} instruments evaluated ({INSTRUMENT_COUNT_LABEL})
+              </p>
+              <ol className="mt-1 space-y-0.5">
+                {[...decision.results]
+                  .sort((x, y) => Number(y.eligible) - Number(x.eligible) || y.totalValue - x.totalValue)
+                  .map((r) => (
+                    <li key={r.instrument} className="flex items-center justify-between gap-2">
+                      <span className={`truncate ${r.instrument === selectedId ? 'font-bold text-[#002E6E]' : ''}`}>
+                        {r.label}
+                        {r.instrument === selectedId ? ' • selected' : ''}
+                      </span>
+                      <span className={`tabular shrink-0 ${r.eligible ? 'font-semibold text-[#002E6E]' : 'text-slate-400'}`}>
+                        {r.eligible ? formatINR(r.totalValue) : r.ineligibleReason}
+                      </span>
+                    </li>
+                  ))}
+              </ol>
             </details>
+            {selected.discount > 0 && <p className="mt-1.5 text-[10px] font-semibold text-[#B45309]">{DEMO_OFFER_NOTE}</p>}
           </div>
 
           {paid ? (
@@ -208,7 +247,7 @@ export function CheckoutScreen() {
       </Card>
 
       <p className="px-1 text-center text-[10px] text-slate-400">
-        Ranking is value-only • co-brand weight 0.00 • {decision.results.length} instruments evaluated
+        Ranking is value-only • co-brand weight 0.00 • {decision.results.length} instruments evaluated ({INSTRUMENT_COUNT_LABEL})
       </p>
 
       {/* Instrument picker */}
@@ -236,6 +275,19 @@ export function CheckoutScreen() {
       </Sheet>
     </div>
   );
+}
+
+/** Floats over the phone screen (not the scrolled counter) so the gain is seen wherever the user tapped. */
+function DeltaChip({ amount }: { amount: number }) {
+  const chip = (
+    <div className="pointer-events-none absolute inset-x-0 top-[132px] z-40 flex justify-center">
+      <span role="status" className="tabular flex items-center gap-1.5 rounded-full bg-[#16A34A] px-4 py-2 text-[14px] font-extrabold text-white shadow-xl motion-safe:animate-floatUp">
+        <TrendingUp size={15} /> +{formatINR(amount)} saved
+      </span>
+    </div>
+  );
+  const target = document.getElementById(PHONE_PORTAL_ID);
+  return target ? createPortal(chip, target) : chip;
 }
 
 function nudgeCopy(id: ScenarioId, from: RouteResult, to: RouteResult): string {
@@ -321,6 +373,12 @@ function RecommendationCard({ rank, result, baseline, onApply }: { rank: number;
             <BadgeCheck size={11} className="mt-[1px] shrink-0" /> {n.text}
           </p>
         ))}
+      {result.discount > 0 && (
+        <p className="mt-1.5 rounded-lg bg-[#D97706]/10 px-2 py-1 text-[10px] font-semibold leading-snug text-[#B45309]">
+          <span className="mr-1 rounded bg-[#D97706] px-1 py-px text-[8.5px] font-bold uppercase text-white">Demo offer data</span>
+          Offer source: illustrative Paytm × issuer promo, not a live AU Bank offer
+        </p>
+      )}
       <PrimaryButton className="mt-2.5 w-full" tone={rank === 1 ? 'cyan' : 'navy'} onClick={onApply}>
         Switch Card &amp; Apply
       </PrimaryButton>

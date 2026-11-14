@@ -1,7 +1,21 @@
 import { ArrowRight, Bot, FileText, Send, Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTourTarget } from '../../components/Tour';
+import { prefersReducedMotion } from '../../lib/motion';
 import { answerQuery, STARTER_PROMPTS, type FactRow, type RagResponse } from '../../lib/ragEngine';
-import { useApp } from '../../state/appState';
+import { getSafeToSpend, useApp } from '../../state/appState';
+
+/** Reveals text word by word, like a streamed LLM reply. Instant under prefers-reduced-motion. */
+function useStreamedText(text: string): { shown: string; done: boolean } {
+  const words = text.split(' ');
+  const [count, setCount] = useState(() => (prefersReducedMotion() ? words.length : 0));
+  useEffect(() => {
+    if (count >= words.length) return;
+    const t = window.setTimeout(() => setCount((c) => Math.min(words.length, c + 2)), 28);
+    return () => window.clearTimeout(t);
+  }, [count, words.length]);
+  return { shown: words.slice(0, count).join(' '), done: count >= words.length };
+}
 
 type Message = { id: number; role: 'user'; text: string } | { id: number; role: 'bot'; response: RagResponse };
 
@@ -21,9 +35,11 @@ export function ChatView() {
   const [typing, setTyping] = useState(false);
   const seq = useRef(0);
   const endRef = useRef<HTMLDivElement>(null);
+  const chipsTour = useTourTarget('chips');
 
+  const scrollToEnd = () => endRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'end' });
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    endRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'end' });
   }, [messages, typing]);
 
   const ask = (text: string) => {
@@ -33,11 +49,15 @@ export function ChatView() {
     setMessages((m) => [...m, { id: seq.current, role: 'user', text: q }]);
     setInput('');
     setTyping(true);
+    const sts = getSafeToSpend(state);
     const response = answerQuery(q, {
       cards: state.cards,
       bankBalance: state.bankBalance,
       billPaid: state.billPaid,
       aaConnected: state.consents.aa,
+      safeToSpend: sts.safe,
+      billedDue: sts.billedDue,
+      unbilledSeen: sts.unbilled,
     });
     dispatch({ type: 'SET_INTENT', intent: response.intent, query: q });
     window.setTimeout(() => {
@@ -63,7 +83,7 @@ export function ChatView() {
         </div>
 
         {messages.length === 0 && (
-          <div className="space-y-2 pl-10">
+          <div ref={chipsTour.ref} className={`space-y-2 pl-10 ${chipsTour.className}`}>
             <p className="text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Try asking</p>
             {STARTER_PROMPTS.map((p) => (
               <button
@@ -83,7 +103,7 @@ export function ChatView() {
               <div className="max-w-[80%] rounded-2xl rounded-tr-md bg-[#00B9F1] px-3 py-2 text-[12.5px] font-medium text-white">{m.text}</div>
             </div>
           ) : (
-            <BotAnswer key={m.id} r={m.response} onAsk={ask} />
+            <BotAnswer key={m.id} r={m.response} onAsk={ask} onStreamed={scrollToEnd} />
           ),
         )}
 
@@ -99,6 +119,9 @@ export function ChatView() {
           </div>
         )}
 
+        {messages.length > 0 && !typing && (
+          <p className="pl-10 text-[10px] font-semibold text-slate-400">Or type your own question below. Answers come only from MITCs.</p>
+        )}
         {messages.length > 0 && !typing && (
           <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 pl-14">
             {STARTER_PROMPTS.map((p) => (
@@ -138,9 +161,14 @@ function BotAvatar() {
   );
 }
 
-function BotAnswer({ r, onAsk }: { r: RagResponse; onAsk: (q: string) => void }) {
+function BotAnswer({ r, onAsk, onStreamed }: { r: RagResponse; onAsk: (q: string) => void; onStreamed: () => void }) {
   const { dispatch } = useApp();
   const isFallback = r.intent === 'fallback.clarify';
+  const { shown, done } = useStreamedText(r.answer);
+  useEffect(() => {
+    if (done) onStreamed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll once when streaming completes
+  }, [done]);
   return (
     <div className="flex gap-2 animate-fadeIn">
       <BotAvatar />
@@ -148,8 +176,13 @@ function BotAnswer({ r, onAsk }: { r: RagResponse; onAsk: (q: string) => void })
         <div className="px-3 pb-2 pt-2.5">
           <p className="text-[13px] font-extrabold leading-snug text-[#002E6E]">{r.title}</p>
           <div className={`mt-1.5 inline-block rounded-lg border px-2 py-1 text-[11px] font-bold ${verdictStyle[r.verdict.tone]}`}>{r.verdict.text}</div>
-          <p className="mt-2 text-[12px] leading-relaxed text-slate-600">{r.answer}</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-600" aria-live="polite" aria-busy={!done}>
+            {shown}
+            {!done && <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-[#00B9F1]" aria-hidden />}
+          </p>
         </div>
+        {done && (
+          <div className="animate-fade">
 
         {r.facts.length > 0 && (
           <div className="mx-3 mb-2 overflow-hidden rounded-xl border border-[#E2E8F0]">
@@ -211,6 +244,8 @@ function BotAnswer({ r, onAsk }: { r: RagResponse; onAsk: (q: string) => void })
             </button>
           )}
         </div>
+          </div>
+        )}
       </div>
     </div>
   );

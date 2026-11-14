@@ -18,14 +18,17 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Badge, Card, PrimaryButton, Toggle } from '../components/ui';
 import { SAVINGS_ACCOUNT, USER } from '../data/cardsData';
 import { formatINR } from '../lib/format';
-import { totalLiability } from '../lib/routingEngine';
-import { useApp } from '../state/appState';
+import { totalBilledDue } from '../lib/routingEngine';
+import { getSafeToSpend, useApp, type Consents } from '../state/appState';
 
 const PDF_STEPS = ['Parsing PDF', 'Detecting MCCs', 'Updating Caps'];
 
 export function PrivacyScreen() {
   const { state, dispatch } = useApp();
-  const safe = state.bankBalance - totalLiability(state.cards);
+  const { safe, unbilled, billedDue, blind } = getSafeToSpend(state);
+  const consentSwitch = (key: keyof Consents, name: string) => (
+    <ConsentSwitch on={state.consents[key]} name={name} onToggle={() => dispatch({ type: 'TOGGLE_CONSENT', key })} />
+  );
 
   return (
     <div className="space-y-4 px-4 pb-6 pt-4">
@@ -54,9 +57,10 @@ export function PrivacyScreen() {
           title="RBI BBPS Bill Fetch & Paytm Native Logs"
           status={state.consents.bbps ? 'Active' : 'Paused'}
           active={state.consents.bbps}
-          right={<Toggle checked={state.consents.bbps} onChange={() => dispatch({ type: 'TOGGLE_CONSENT', key: 'bbps' })} label="Toggle BBPS bill fetch" />}
+          right={consentSwitch('bbps', 'BBPS bill fetch')}
         >
-          Auto-synced across 35+ banks via Bharat BillPay — statement amount, due date and minimum due fetched with your registered mobile number. Paytm checkout logs add exact MCCs.
+          Auto-synced across 35+ banks via Bharat BillPay: statement amount, due date and minimum due are fetched with your registered mobile number. Paytm checkout logs add exact MCCs.
+          <Feeds on={state.consents.bbps} label="Feeds Safe-to-Spend" value={`−${formatINR(totalBilledDue(state.cards))} billed due`} />
         </Tier>
 
         <Tier
@@ -65,13 +69,13 @@ export function PrivacyScreen() {
           title="On-Device Android Edge SMS Sandbox"
           status={state.consents.sms ? 'Active' : 'Off'}
           active={state.consents.sms}
-          right={<Toggle checked={state.consents.sms} onChange={() => dispatch({ type: 'TOGGLE_CONSENT', key: 'sms' })} label="Toggle SMS sandbox" />}
+          right={consentSwitch('sms', 'On-device SMS sandbox')}
         >
           <Badge tone="emerald" className="mb-1.5 !whitespace-normal !rounded-lg">
             <Cpu size={11} /> 100% local regex/SLM parsing; raw SMS never leaves device — DPDP Act Compliant
           </Badge>
           <p>Captures real-time RuPay-on-UPI and card alerts the moment they arrive. Only structured fields (amount, merchant, card last-4) are stored.</p>
-          {!state.consents.sms && <p className="mt-1 font-semibold text-[#D97706]">Real-time UPI-credit detection paused — Safe-to-Spend may lag up to 1 billing cycle.</p>}
+          <Feeds on={state.consents.sms} label="Feeds Safe-to-Spend" value={`−${formatINR(state.cards.scapia.unbilled)} RuPay-on-UPI unbilled`} />
         </Tier>
 
         <AliasTier />
@@ -82,7 +86,7 @@ export function PrivacyScreen() {
           title="RBI Account Aggregator (CASA Balance Sync)"
           status={state.consents.aa ? 'Connected' : 'Revoked'}
           active={state.consents.aa}
-          right={<Toggle checked={state.consents.aa} onChange={() => dispatch({ type: 'TOGGLE_CONSENT', key: 'aa' })} label="Toggle Account Aggregator consent" />}
+          right={consentSwitch('aa', 'Account Aggregator consent')}
         >
           {state.consents.aa ? (
             <>
@@ -91,17 +95,29 @@ export function PrivacyScreen() {
           ) : (
             <>Consent artefact revoked. CardSense purged the cached balance (DPDP §8(7)). Safe-to-Spend is paused until you re-grant.</>
           )}
+          <Feeds on={state.consents.aa} label="Feeds Safe-to-Spend" value={`${formatINR(state.bankBalance)} AA balance`} />
           <p className="mt-1 text-[10.5px] text-slate-400">Revocable 1-tap consent • ReBIT consent artefact v2.0</p>
         </Tier>
       </div>
 
       <Card className="p-3.5">
         <p className="mb-2 text-[10.5px] font-bold uppercase tracking-wide text-slate-500">Pipeline output</p>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Stat label="Safe-to-Spend" value={state.consents.aa ? formatINR(safe) : '—'} tone="text-[#00B9F1]" />
-          <Stat label="Unbilled" value={formatINR(totalLiability(state.cards))} tone="text-[#EC184A]" />
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <Stat label="Safe-to-Spend" value={safe === null ? 'Paused' : formatINR(safe)} tone={safe !== null && safe < 0 ? 'text-[#EC184A]' : 'text-[#00B9F1]'} />
           <Stat label="Sources live" value={`${[state.consents.bbps, state.consents.sms, true, state.consents.aa].filter(Boolean).length}/4`} tone="text-[#16A34A]" />
+          <Stat label="Unbilled seen" value={formatINR(unbilled)} tone="text-[#EC184A]" />
+          <Stat label="Bills due seen" value={formatINR(billedDue)} tone="text-[#D97706]" />
         </div>
+        <p className="tabular mt-2 text-center text-[10.5px] text-slate-500">
+          {safe === null
+            ? 'AA revoked: no balance to net against'
+            : `${formatINR(state.bankBalance)} AA − ${formatINR(unbilled)} unbilled − ${formatINR(billedDue)} due = ${formatINR(safe)}`}
+        </p>
+        {blind.map((x) => (
+          <p key={x.source} className="mt-1.5 rounded-lg bg-[#D97706]/10 px-2 py-1 text-[10.5px] font-semibold text-[#B45309]">
+            Blind spot: {x.label} ({formatINR(x.amount)}) not counted. Safe-to-Spend is overstated.
+          </p>
+        ))}
       </Card>
 
       <Card className="p-3.5">
@@ -115,6 +131,25 @@ export function PrivacyScreen() {
         </ul>
       </Card>
     </div>
+  );
+}
+
+function ConsentSwitch({ on, name, onToggle }: { on: boolean; name: string; onToggle: () => void }) {
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-0.5">
+      <Toggle checked={on} onChange={onToggle} label={`${on ? 'Revoke' : 'Grant'} ${name} consent`} />
+      <span className={`text-[9px] font-bold ${on ? 'text-slate-400' : 'text-[#EC184A]'}`}>{on ? 'Tap to revoke' : 'Revoked'}</span>
+    </div>
+  );
+}
+
+/** Shows what this tier contributes to Safe-to-Spend, struck through once its consent is revoked. */
+function Feeds({ on, label, value }: { on: boolean; label: string; value: string }) {
+  return (
+    <p className={`mt-1.5 flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-[10.5px] font-semibold ${on ? 'bg-[#00B9F1]/10 text-[#0077A0]' : 'bg-slate-100 text-slate-400'}`}>
+      <span>{on ? label : 'Dropped from Safe-to-Spend'}</span>
+      <span className={`tabular ${on ? '' : 'line-through'}`}>{value}</span>
+    </p>
   );
 }
 
@@ -133,7 +168,7 @@ function Tier({ n, icon, title, status, active, right, children }: { n: number; 
       <div className={`absolute -left-5 top-4 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-extrabold text-white ring-4 ring-[#F4F7FA] ${active ? 'bg-[#00B9F1]' : 'bg-slate-400'}`}>
         {n}
       </div>
-      <Card className={`p-3.5 transition ${active ? '' : 'opacity-75'}`}>
+      <Card className={`p-3.5 transition ${active ? '' : 'border-dashed opacity-70 grayscale'}`}>
         <div className="flex items-start gap-2.5">
           <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-[#00B9F1]/10 text-[#0089B3]' : 'bg-slate-100 text-slate-400'}`}>{icon}</div>
           <div className="min-w-0 flex-1">

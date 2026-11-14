@@ -17,6 +17,7 @@ import {
 } from '../data/cardsData';
 import { formatINR } from './format';
 
+/** Simulated production p95 budget (network + rule match). The on-device match itself is measured with performance.now(). */
 export const ROUTING_LATENCY_MS = 38;
 export const CO_BRAND_BIAS_WEIGHT = 0;
 
@@ -51,7 +52,18 @@ export interface RoutingDecision {
   results: RouteResult[];
   ranked: RouteResult[];
   best: RouteResult;
+  /** Simulated production p95 latency budget. */
   latencyMs: number;
+  /** Real wall-clock time of this evaluation in the browser (performance.now()). */
+  computeMs: number;
+}
+
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/** Formats a measured duration: sub-millisecond values keep 2 decimals. */
+export function formatMs(ms: number): string {
+  if (ms < 0.01) return '<0.01ms';
+  return ms < 10 ? `${ms.toFixed(2)}ms` : `${Math.round(ms)}ms`;
 }
 
 export function instrumentLabel(id: InstrumentId): { label: string; sublabel: string } {
@@ -65,14 +77,12 @@ export function instrumentLabel(id: InstrumentId): { label: string; sublabel: st
   };
 }
 
-/** Instruments the user could pick on a given rail. */
-export function instrumentsForChannel(channel: Channel): InstrumentId[] {
-  const cards = CARD_ORDER.filter((id) => {
-    if (channel === 'upiQr') return id === 'scapia'; // only RuPay credit cards ride UPI
-    return true;
-  });
-  return ['hdfcUpi', ...cards];
+/** Every instrument is evaluated on every rail (4 cards + HDFC Savings UPI); ineligible ones are reported, not hidden. */
+export function allInstruments(): InstrumentId[] {
+  return ['hdfcUpi', ...CARD_ORDER];
 }
+
+export const INSTRUMENT_COUNT_LABEL = `${CARD_ORDER.length} cards + HDFC Savings UPI`;
 
 function evaluateCard(cardId: CardId, txn: Transaction, live: LiveCards): RouteResult {
   const card = CARDS[cardId];
@@ -97,9 +107,11 @@ function evaluateCard(cardId: CardId, txn: Transaction, live: LiveCards): RouteR
       ...base,
       eligible: false,
       ineligibleReason:
-        card.network === 'Diners'
-          ? 'Diners network not tokenised on this Paytm rail'
-          : 'Card not accepted on this rail',
+        txn.channel === 'upiQr'
+          ? 'Only RuPay credit cards can be linked to UPI'
+          : card.network === 'Diners'
+            ? 'Diners network not tokenised on this Paytm rail'
+            : 'Card not accepted on this rail',
     };
   }
 
@@ -221,12 +233,13 @@ export function evaluate(instrument: InstrumentId, txn: Transaction, live: LiveC
 }
 
 export function routeTransaction(txn: Transaction, live: LiveCards): RoutingDecision {
-  const results = instrumentsForChannel(txn.channel).map((id) => evaluate(id, txn, live));
+  const t0 = now();
+  const results = allInstruments().map((id) => evaluate(id, txn, live));
   const ranked = results
     .filter((r) => r.eligible)
     // Value-only ranking. Tie-breaker: strategic progress (lounge gate), never co-brand status.
     .sort((a, b) => b.totalValue - a.totalValue || Number(b.countsTowardLounge) - Number(a.countsTowardLounge));
-  return { results, ranked, best: ranked[0], latencyMs: ROUTING_LATENCY_MS };
+  return { results, ranked, best: ranked[0], latencyMs: ROUTING_LATENCY_MS, computeMs: now() - t0 };
 }
 
 /* ------------------------------------------------------------------ */
@@ -235,6 +248,36 @@ export function routeTransaction(txn: Transaction, live: LiveCards): RoutingDeci
 
 export function totalLiability(live: LiveCards): number {
   return CARD_ORDER.reduce((sum, id) => sum + live[id].unbilled, 0);
+}
+
+export function totalBilledDue(live: LiveCards): number {
+  return CARD_ORDER.reduce((sum, id) => sum + live[id].statementDue, 0);
+}
+
+export interface SafeToSpend {
+  /** null when AA consent is revoked (no balance to net against). */
+  safe: number | null;
+  balance: number;
+  unbilled: number;
+  billedDue: number;
+  /** Liabilities CardSense can't see because a data source was revoked. Safe-to-Spend is overstated by this much. */
+  blind: Array<{ source: 'bbps' | 'sms'; label: string; amount: number }>;
+}
+
+/**
+ * Safe-to-Spend = AA balance − unbilled card spends − unpaid billed statements (deck slide 5).
+ * Each term depends on a consented source: BBPS supplies billed dues, on-device SMS supplies
+ * RuPay-on-UPI unbilled spends, AA supplies the balance. Revoking one drops its term.
+ */
+export function computeSafeToSpend(balance: number, live: LiveCards, consents: { bbps: boolean; sms: boolean; aa: boolean }): SafeToSpend {
+  const blind: SafeToSpend['blind'] = [];
+  const upiCredit = live.scapia.unbilled;
+  const unbilled = totalLiability(live) - (consents.sms ? 0 : upiCredit);
+  if (!consents.sms && upiCredit > 0) blind.push({ source: 'sms', label: 'RuPay-on-UPI spends (Scapia)', amount: upiCredit });
+  const dues = totalBilledDue(live);
+  const billedDue = consents.bbps ? dues : 0;
+  if (!consents.bbps && dues > 0) blind.push({ source: 'bbps', label: 'Billed statement due (BBPS)', amount: dues });
+  return { safe: consents.aa ? balance - unbilled - billedDue : null, balance, unbilled, billedDue, blind };
 }
 
 export function utilityCapStatus(live: LiveCards) {

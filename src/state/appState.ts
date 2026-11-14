@@ -13,7 +13,8 @@ import {
   type Voucher,
 } from '../data/cardsData';
 import { clock, formatINR } from '../lib/format';
-import type { RouteResult } from '../lib/routingEngine';
+import { computeSafeToSpend, type RouteResult, type SafeToSpend } from '../lib/routingEngine';
+import { TOUR_STEPS } from '../lib/tour';
 
 export type TabId = 'overview' | 'checkout' | 'concierge' | 'privacy';
 export type ConciergeView = 'chat' | 'vault' | 'upgrade';
@@ -60,6 +61,8 @@ export interface AppState {
   events: EventLog[];
   toast: string | null;
   lastIntent: string | null;
+  /** Index into TOUR_STEPS while the guided tour runs, else null. */
+  tour: number | null;
 }
 
 let eventSeq = 0;
@@ -101,6 +104,7 @@ export function createInitialState(): AppState {
     events: [{ id: 0, time: clock(), text: 'Session started • 4 cards + 1 AA account synced' }],
     toast: null,
     lastIntent: null,
+    tour: null,
   };
 }
 
@@ -121,7 +125,10 @@ export type Action =
   | { type: 'TOAST'; message: string }
   | { type: 'CLEAR_TOAST' }
   | { type: 'LOG'; text: string }
-  | { type: 'RESET' };
+  | { type: 'RESET' }
+  | { type: 'TOUR_START' }
+  | { type: 'TOUR_GO'; step: number }
+  | { type: 'TOUR_END' };
 
 function chargeCard(cards: LiveCards, cardId: CardId, amount: number, result?: RouteResult): LiveCards {
   const prev = cards[cardId];
@@ -273,7 +280,25 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'LOG':
       return { ...state, events: log(state, action.text) };
     case 'RESET':
-      return { ...createInitialState(), telemetryOn: state.telemetryOn, tab: state.tab };
+      return { ...createInitialState(), telemetryOn: state.telemetryOn, tab: state.tab, events: log(state, 'Demo state reset') };
+    case 'TOUR_START': {
+      // The tour always starts from a clean seed so every step behaves the same.
+      const fresh = createInitialState();
+      return { ...fresh, telemetryOn: state.telemetryOn, tab: 'overview', tour: 0, events: log(state, 'Guided tour started (demo state reset)') };
+    }
+    case 'TOUR_GO': {
+      const step = TOUR_STEPS[action.step];
+      if (!step) return { ...state, tour: null };
+      return {
+        ...state,
+        tour: action.step,
+        tab: step.tab,
+        scenario: step.scenario ?? state.scenario,
+        conciergeView: step.conciergeView ?? state.conciergeView,
+      };
+    }
+    case 'TOUR_END':
+      return { ...state, tour: null };
     default:
       return state;
   }
@@ -290,6 +315,11 @@ export function useApp(): AppContextValue {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error('useApp must be used inside <AppProvider>');
   return ctx;
+}
+
+/** Single source of truth for Safe-to-Spend across Overview, Privacy, Concierge and the Inspector. */
+export function getSafeToSpend(state: AppState): SafeToSpend {
+  return computeSafeToSpend(state.bankBalance, state.cards, state.consents);
 }
 
 /** Live counter: value captured by applied CardSense switches (+ banked from completed, restarted checkouts). */

@@ -1,33 +1,33 @@
 import { Activity, BadgeIndianRupee, ChevronDown, Gauge, Hash, RotateCcw, ScrollText, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { formatINR } from '../lib/format';
-import { totalLiability } from '../lib/routingEngine';
 import { getTelemetry } from '../lib/telemetry';
-import { sessionSaved, useApp } from '../state/appState';
+import { getSafeToSpend, sessionSaved, useApp } from '../state/appState';
 import { Toggle } from './ui';
 
-export function InspectorPanel() {
+export function InspectorPanel({ alwaysOpen = false }: { alwaysOpen?: boolean }) {
   const { state, dispatch } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
   const t = getTelemetry(state);
-  const safe = state.bankBalance - totalLiability(state.cards);
+  const { safe } = getSafeToSpend(state);
+  const expanded = alwaysOpen || mobileOpen;
 
   return (
-    <aside className="w-full max-w-[420px] lg:sticky lg:top-10 lg:w-[380px] lg:max-w-none">
+    <aside className="w-full">
       <div className="overflow-hidden rounded-3xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-15px_rgba(0,46,110,0.25)]">
         <button
-          className="flex w-full items-center justify-between gap-3 bg-[#002E6E] px-5 py-4 text-left text-white lg:cursor-default"
-          onClick={() => setMobileOpen((o) => !o)}
-          aria-expanded={mobileOpen}
+          className={`flex w-full items-center justify-between gap-3 bg-[#002E6E] px-5 py-4 text-left text-white lg:cursor-default ${alwaysOpen ? 'cursor-default' : ''}`}
+          onClick={() => !alwaysOpen && setMobileOpen((o) => !o)}
+          aria-expanded={expanded}
         >
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#00B9F1]">Evaluator mode</p>
             <h2 className="text-[15px] font-bold">PM Evaluator Inspector Panel</h2>
           </div>
-          <ChevronDown size={18} className={`transition lg:hidden ${mobileOpen ? 'rotate-180' : ''}`} />
+          {!alwaysOpen && <ChevronDown size={18} className={`transition lg:hidden ${mobileOpen ? 'rotate-180' : ''}`} />}
         </button>
 
-        <div className={`${mobileOpen ? 'block' : 'hidden'} lg:block`}>
+        <div className={`${expanded ? 'block' : 'hidden'} lg:block`}>
           <div className="flex items-center justify-between gap-3 border-b border-[#E2E8F0] px-5 py-3.5">
             <span className="text-[12px] font-semibold text-[#002E6E]">
               Show PM &amp; AI Guardrail Telemetry:{' '}
@@ -46,8 +46,20 @@ export function InspectorPanel() {
                 Live • {t.screen}
               </div>
 
+              <p className="flex items-start gap-1.5 rounded-xl border border-[#D97706]/25 bg-[#D97706]/10 px-2.5 py-1.5 text-[10.5px] leading-snug text-[#B45309]">
+                <span className="shrink-0 rounded bg-[#D97706] px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">Simulated telemetry</span>
+                Values tagged “simulated” are illustrative. Latency tagged “measured” is real performance.now() timing of the rule engine in this browser.
+              </p>
+
               <div className="grid grid-cols-2 gap-2.5">
-                <Tile icon={<Gauge size={14} />} label="Deterministic Routing Latency" value={t.latency} sub={t.latencyNote} accent="text-[#00B9F1]" />
+                <Tile
+                  icon={<Gauge size={14} />}
+                  label="Deterministic Routing Latency"
+                  value={t.latency}
+                  sub={t.latencyNote}
+                  accent="text-[#00B9F1]"
+                  tag={t.latencyMeasured ? 'measured' : 'simulated'}
+                />
                 <Tile icon={<Hash size={14} />} label="Active MCC Code" value={t.mcc.split(' — ')[0].split(' • ')[0]} sub={t.mcc.includes('—') ? t.mcc.split(' — ')[1] : t.mcc.split(' • ').slice(1).join(' • ') || '—'} />
               </div>
 
@@ -73,14 +85,17 @@ export function InspectorPanel() {
                         {g.ok ? <ShieldCheck size={12} className="text-[#16A34A]" /> : <ShieldAlert size={12} className="text-[#EC184A]" />}
                         {g.label}
                       </span>
-                      <span className={`font-semibold ${g.ok ? 'text-[#002E6E]' : 'text-[#EC184A]'}`}>{g.value}</span>
+                      <span className={`flex items-center gap-1 font-semibold ${g.ok ? 'text-[#002E6E]' : 'text-[#EC184A]'}`}>
+                        {g.value}
+                        {g.simulated && <MiniTag kind="simulated" />}
+                      </span>
                     </li>
                   ))}
                 </ul>
               </Block>
 
               <div className="grid grid-cols-2 gap-2.5">
-                <Tile label="Safe-to-Spend (live)" value={state.consents.aa ? formatINR(safe) : 'AA off'} />
+                <Tile label="Safe-to-Spend (live)" value={safe === null ? 'AA off' : formatINR(safe)} accent={safe !== null && safe < 0 ? 'text-[#EC184A]' : 'text-[#002E6E]'} />
                 <Tile label="Session rewards saved" value={formatINR(sessionSaved(state))} accent="text-[#16A34A]" />
               </div>
 
@@ -113,13 +128,28 @@ export function InspectorPanel() {
   );
 }
 
-function Tile({ label, value, sub, icon, accent = 'text-[#002E6E]' }: { label: string; value: string; sub?: string; icon?: ReactNode; accent?: string }) {
+function MiniTag({ kind }: { kind: 'measured' | 'simulated' }) {
+  return (
+    <span
+      className={`rounded px-1 py-px text-[8.5px] font-bold uppercase tracking-wide ${kind === 'measured' ? 'bg-[#16A34A]/15 text-[#15803D]' : 'bg-[#D97706]/15 text-[#B45309]'}`}
+    >
+      {kind}
+    </span>
+  );
+}
+
+function Tile({ label, value, sub, icon, tag, accent = 'text-[#002E6E]' }: { label: string; value: string; sub?: string; icon?: ReactNode; tag?: 'measured' | 'simulated'; accent?: string }) {
   return (
     <div className="rounded-2xl border border-[#E2E8F0] bg-[#F4F7FA] p-3">
       <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
         {icon}
         {label}
       </p>
+      {tag && (
+        <div className="mt-1">
+          <MiniTag kind={tag} />
+        </div>
+      )}
       <p className={`tabular mt-1 text-[20px] font-extrabold leading-tight ${accent}`}>{value}</p>
       {sub && <p className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{sub}</p>}
     </div>
