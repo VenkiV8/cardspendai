@@ -134,7 +134,7 @@ export function ChatView() {
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={onSubmit} className="sticky bottom-0 border-t border-[#E2E8F0] bg-white px-3 py-2.5">
+      <form onSubmit={onSubmit} className="sticky bottom-0 z-10 border-t border-[#E2E8F0] bg-white px-3 py-2.5">
         <div className="flex items-center gap-2 rounded-2xl border border-[#E2E8F0] bg-[#F4F7FA] py-1 pl-3 pr-1 focus-within:border-[#00B9F1]">
           <Sparkles size={15} className="shrink-0 text-[#00B9F1]" />
           <input

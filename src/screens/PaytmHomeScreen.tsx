@@ -20,7 +20,6 @@ import {
   ShoppingBasket,
   Smartphone,
   SmartphoneNfc,
-  Sparkles,
   Store,
   Train,
   TrendingUp,
@@ -29,7 +28,8 @@ import {
   Home as HomeIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { TourBar, useTourTarget } from '../components/Tour';
+import { useRef } from 'react';
+import { TourBar, useTourDock, useTourTarget } from '../components/Tour';
 import { PaytmLogo } from '../components/ui';
 import { useApp } from '../state/appState';
 
@@ -72,9 +72,12 @@ const NAV: Array<{ label: string; icon: LucideIcon }> = [
 export function PaytmHomeScreen({ compact }: { compact: boolean }) {
   const { state, dispatch } = useApp();
   const demo = () => dispatch({ type: 'TOAST', message: DEMO_TOAST });
+  const screen = useRef<HTMLDivElement>(null);
+  const dock = useTourDock(screen);
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-[#F4F7FA]">
+    <div ref={screen} className="relative flex min-h-0 flex-1 flex-col bg-[#F4F7FA]">
+      {dock === 'top' && <TourBar dock="top" />}
       <main className="thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden">
         {/* Blue header */}
         <div className="bg-gradient-to-b from-[#00B9F1] via-[#0091E0] to-[#0A5BC4] px-3 pb-5 pt-2 text-white">
@@ -107,7 +110,7 @@ export function PaytmHomeScreen({ compact }: { compact: boolean }) {
           </div>
         </div>
 
-        <div className="-mt-3 space-y-3 px-3 pb-24">
+        <div className="-mt-3 space-y-3 px-3 pb-4">
           {/* Paytm Money strip */}
           <button onClick={demo} className="flex w-full items-center gap-2.5 rounded-2xl bg-white px-3 py-2.5 text-left shadow-sm">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#16A34A]/10 text-[#16A34A]">
@@ -122,8 +125,9 @@ export function PaytmHomeScreen({ compact }: { compact: boolean }) {
           {/* Service grid */}
           <section className="rounded-2xl bg-white px-2 pb-3 pt-3 shadow-sm">
             <h2 className="mb-2 px-1.5 text-[13px] font-bold text-[#002E6E]">Recharge, Bills &amp; More</h2>
+            <CoachMark show={!state.coachDismissed} />
             <div className="grid grid-cols-4 gap-y-3">
-              <CardSenseTile onOpen={() => dispatch({ type: 'OPEN_CARDSENSE' })} coach={state.tour === 0 || state.tour === null} />
+              <CardSenseTile onOpen={() => dispatch({ type: 'OPEN_CARDSENSE' })} />
               {SERVICES.map(({ label, icon: Icon }) => (
                 <button key={label} onClick={demo} className="flex flex-col items-center gap-1 rounded-xl px-0.5 py-1 hover:bg-slate-50">
                   <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#00B9F1]/10 text-[#0077C8]">
@@ -147,43 +151,66 @@ export function PaytmHomeScreen({ compact }: { compact: boolean }) {
         </div>
       </main>
 
+      {/* Docked above the nav, in the layout, so it never sits on top of a tile. */}
       {state.tour === null && (
         <button
           onClick={() => dispatch({ type: 'TOUR_START' })}
-          className="absolute bottom-[76px] right-3 z-20 flex items-center gap-1 rounded-full bg-[#002E6E] px-3 py-1.5 text-[11px] font-bold text-white shadow-lg hover:bg-[#0A3D80]"
+          className="flex shrink-0 items-center justify-center gap-1.5 border-t border-[#E2E8F0] bg-white py-2 text-[11.5px] font-bold text-[#002E6E] hover:bg-[#F4F7FA]"
           aria-label="Start guided tour"
         >
-          <PlayCircle size={14} /> Guided tour
+          <PlayCircle size={15} className="text-[#00B9F1]" /> New here? Take the guided tour
         </button>
       )}
 
-      <TourBar />
+      {dock === 'bottom' && <TourBar dock="bottom" />}
       <HomeNav compact={compact} onTap={demo} />
     </div>
   );
 }
 
-function CardSenseTile({ onOpen, coach }: { onOpen: () => void; coach: boolean }) {
+/** Minimal outline card with a check mark, drawn inline (no image files). Matches the 20px service icons. */
+function CardCheckIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#002970" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2" y="5" width="20" height="14" rx="2.5" />
+      <path d="M2 9.5h20" />
+      <path d="M6 15h4" />
+      <path d="M14.5 15.2l1.6 1.6 3-3.2" />
+    </svg>
+  );
+}
+
+function CardSenseTile({ onOpen }: { onOpen: () => void }) {
   const tour = useTourTarget<HTMLDivElement>('tile');
   return (
-    <div ref={tour.ref} className={`relative flex justify-center ${tour.className}`}>
-      <button onClick={onOpen} className="flex flex-col items-center gap-1 rounded-xl px-0.5 py-1" aria-label="Open CardSense AI: optimise your credit cards">
-        <span className="relative flex h-11 w-11 items-center justify-center">
-          {/* Expanding ring ripple behind the icon */}
-          <span className="absolute inset-0 rounded-2xl border-2 border-[#00B9F1] opacity-0 motion-safe:animate-tileRipple" aria-hidden />
-          <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#00B9F1] to-[#002E6E] text-white shadow-[0_0_0_0_rgba(0,185,241,0.6)] motion-safe:animate-tileBeat">
-            <Sparkles size={20} />
-          </span>
+    <div ref={tour.ref} className={`flex justify-center ${tour.className}`}>
+      <button onClick={onOpen} className="flex flex-col items-center gap-1 rounded-xl px-0.5 py-1 hover:bg-slate-50" aria-label="Open CardSense AI: optimise your credit cards">
+        <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-[#00B9F1]/10 motion-safe:animate-tileRing">
+          <CardCheckIcon />
           <span className="absolute -right-2.5 -top-1.5 rounded-full bg-[#EC184A] px-1 py-px text-[8px] font-extrabold uppercase tracking-wide text-white ring-2 ring-white">New</span>
         </span>
-        <span className="text-center text-[10px] font-extrabold leading-tight text-[#002E6E]">CardSense AI</span>
+        <span className="text-center text-[10px] font-semibold leading-tight text-[#002E6E]">CardSense AI</span>
       </button>
-      {coach && (
-        <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-[150px] rounded-xl bg-[#002E6E] px-2.5 py-1.5 text-[10.5px] font-semibold leading-snug text-white shadow-lg animate-fadeIn">
-          <span className="absolute -top-1 left-7 h-2.5 w-2.5 rotate-45 bg-[#002E6E]" aria-hidden />
-          Tap to optimise your credit cards
+    </div>
+  );
+}
+
+/**
+ * Coach-mark in its own row between the section title and the grid, pointing down at the first tile,
+ * so it never covers another tile's label. Fades and collapses once the tile is tapped or the tour starts.
+ */
+function CoachMark({ show }: { show: boolean }) {
+  return (
+    <div
+      className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${show ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+      aria-hidden={!show}
+    >
+      <div className="relative overflow-hidden">
+        <div className="pb-2.5">
+          <p className="inline-block rounded-lg bg-[#002E6E] px-2.5 py-1 text-[10.5px] font-semibold text-white shadow-sm">Tap to optimise your credit cards</p>
         </div>
-      )}
+        <span className="absolute bottom-[5px] left-[calc(12.5%-5px)] h-2.5 w-2.5 rotate-45 bg-[#002E6E]" aria-hidden />
+      </div>
     </div>
   );
 }

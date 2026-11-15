@@ -98,6 +98,9 @@ export const USER = {
 };
 
 /** Demo "today": Friday, 27 March 2026 — 4 days before the Diners quarter closes. */
+/** Amount used by the “Simulate spend” demo action on HDFC Diners Black. */
+export const DINERS_SIM_AMOUNT = 12500;
+
 export const DEMO_DATE = {
   label: 'Fri, 27 Mar 2026',
   day: 27,

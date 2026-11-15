@@ -1,8 +1,11 @@
 import { CheckCircle2, ChevronRight, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { TOUR_STEPS, type TourTargetId } from '../lib/tour';
 import { useApp } from '../state/appState';
 import { prefersReducedMotion } from '../lib/motion';
+
+/** Marker class on the element the current tour step is describing (used to place the tour card). */
+const ACTIVE_MARKER = 'tour-active';
 
 /** Highlights one element at a time while the guided tour is on the matching step. */
 export function useTourTarget<T extends HTMLElement = HTMLDivElement>(id: TourTargetId) {
@@ -22,12 +25,42 @@ export function useTourTarget<T extends HTMLElement = HTMLDivElement>(id: TourTa
   return {
     ref,
     active,
-    className: active ? 'relative z-[1] rounded-2xl ring-[3px] ring-[#00B9F1] ring-offset-2 ring-offset-[#F4F7FA] motion-safe:animate-tourPulse' : '',
+    className: active ? `${ACTIVE_MARKER} relative z-[1] rounded-2xl ring-[3px] ring-[#00B9F1] ring-offset-2 ring-offset-[#F4F7FA] motion-safe:animate-tourPulse` : '',
   };
 }
 
-/** Docked above the bottom nav (inside the phone) so it never covers content. */
-export function TourBar() {
+export type TourDock = 'top' | 'bottom';
+
+/**
+ * Decides where the tour card docks so it never covers the highlighted element:
+ * element in the lower half of the screen → card at the top, otherwise at the bottom.
+ * The card is docked in the layout (not floating), so the content area shrinks rather than being covered.
+ * Measured once per step, after the target has scrolled into view, so the card doesn't jump around.
+ */
+export function useTourDock(screenRef: RefObject<HTMLElement>): TourDock {
+  const { state } = useApp();
+  const [dock, setDock] = useState<TourDock>('bottom');
+  const key = `${state.tour}|${state.surface}|${state.tab}|${state.cardDetail}`;
+
+  useEffect(() => {
+    if (state.tour === null) return;
+    const measure = () => {
+      const screen = screenRef.current;
+      const el = screen?.querySelector(`.${ACTIVE_MARKER}`);
+      if (!screen || !el) return;
+      const s = screen.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      setDock(r.top + r.height / 2 > s.top + s.height / 2 ? 'top' : 'bottom');
+    };
+    const t = window.setTimeout(measure, prefersReducedMotion() ? 200 : 650);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-measure only when the step or screen changes
+  }, [key]);
+
+  return dock;
+}
+
+export function TourBar({ dock }: { dock: TourDock }) {
   const { state, dispatch } = useApp();
   if (state.tour === null) return null;
   const i = state.tour;
@@ -35,8 +68,21 @@ export function TourBar() {
   const done = step.done ? step.done(state) : true;
   const last = i === TOUR_STEPS.length - 1;
 
+  const next = () => {
+    if (last) return dispatch({ type: 'TOUR_END' });
+    // Steps that ask the user to act do it for them when they press Next instead.
+    if (!done && step.act) step.act(state).forEach(dispatch);
+    dispatch({ type: 'TOUR_GO', step: i + 1 });
+  };
+
   return (
-    <div className="shrink-0 border-t border-[#00B9F1]/30 bg-[#002E6E] px-4 py-2.5 text-white animate-fade" role="region" aria-label="Guided tour" aria-live="polite">
+    <div
+      className={`shrink-0 bg-[#002E6E] px-4 py-2.5 text-white animate-fade ${dock === 'top' ? 'border-b' : 'border-t'} border-[#00B9F1]/30`}
+      role="region"
+      aria-label="Guided tour"
+      aria-live="polite"
+      data-dock={dock}
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#7FDBFF]">
           Tour • Step {i + 1} of {TOUR_STEPS.length}
@@ -68,13 +114,8 @@ export function TourBar() {
         >
           Back
         </button>
-        <button
-          onClick={() => (last ? dispatch({ type: 'TOUR_END' }) : dispatch({ type: 'TOUR_GO', step: i + 1 }))}
-          className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11.5px] font-bold transition ${
-            done ? 'bg-[#00B9F1] text-white' : 'bg-white/10 text-white/70 hover:bg-white/15'
-          }`}
-        >
-          {last ? 'Finish tour' : done ? 'Next' : 'Skip step'} <ChevronRight size={13} />
+        <button onClick={next} className="inline-flex items-center gap-1 rounded-lg bg-[#00B9F1] px-3 py-1.5 text-[11.5px] font-bold text-white transition hover:bg-[#00A5D8]">
+          {last ? 'Finish' : 'Next'} <ChevronRight size={13} />
         </button>
       </div>
     </div>

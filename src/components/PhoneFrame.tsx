@@ -1,9 +1,9 @@
 import { ArrowLeft, BatteryFull, CreditCard, LayoutGrid, PlayCircle, RotateCcw, ShieldCheck, Signal, Ticket, Wifi } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { CardDetailScreen } from '../screens/CardDetailScreen';
 import { PaytmHomeScreen } from '../screens/PaytmHomeScreen';
 import { useApp, type TabId } from '../state/appState';
-import { TourBar } from './Tour';
+import { TourBar, useTourDock } from './Tour';
 import { PHONE_PORTAL_ID, PaytmLogo } from './ui';
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof LayoutGrid }> = [
@@ -108,24 +108,38 @@ function BottomNav({ compact }: { compact: boolean }) {
   );
 }
 
-/** The CardSense app: header, active tab (or a pushed Card Detail page), tour bar and tab bar. */
+/**
+ * The CardSense app: header, active tab (or a pushed Card Detail page), tour card and tab bar.
+ * The header renders instantly on entry; only the content slides in (220ms, starting at 85% opacity),
+ * so opening CardSense never shows a blank screen.
+ */
 function CardSenseApp({ children, compact }: { children: ReactNode; compact: boolean }) {
   const { state } = useApp();
+  const screen = useRef<HTMLDivElement>(null);
+  const dock = useTourDock(screen);
+  const entering = useRef(true);
+  useEffect(() => {
+    entering.current = false;
+  }, []);
   return (
-    <div className="flex min-h-0 flex-1 flex-col animate-slideIn">
+    <div ref={screen} className="flex min-h-0 flex-1 flex-col">
       {state.cardDetail ? (
-        <main key={`card-${state.cardDetail}`} className="thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden animate-slideIn">
-          <CardDetailScreen id={state.cardDetail} />
-        </main>
+        <>
+          {dock === 'top' && <TourBar dock="top" />}
+          <main key={`card-${state.cardDetail}`} className="thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden animate-slideIn">
+            <CardDetailScreen id={state.cardDetail} />
+          </main>
+        </>
       ) : (
         <>
           <AppHeader />
-          <main key={state.tab} className="thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden animate-fade">
+          {dock === 'top' && <TourBar dock="top" />}
+          <main key={state.tab} className={`thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden ${entering.current ? 'animate-slideIn' : 'animate-fade'}`}>
             {children}
           </main>
         </>
       )}
-      <TourBar />
+      {dock === 'bottom' && <TourBar dock="bottom" />}
       {!state.cardDetail && <BottomNav compact={compact} />}
     </div>
   );
@@ -133,13 +147,14 @@ function CardSenseApp({ children, compact }: { children: ReactNode; compact: boo
 
 /**
  * `compact` (viewport < 500px): the real phone is the device, so the bezel, fake status bar and
- * notch are dropped and the app fills the screen. Otherwise the frame is sized to the viewport height.
+ * notch are dropped and the app fills the screen. Otherwise the frame height follows the viewport
+ * (vh units) so the whole phone stays visible from 800×600 up to 1080p; content scrolls inside it.
  */
 export function PhoneFrame({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
   const { state } = useApp();
   const home = state.surface === 'home';
   const surface = home ? (
-    <div key="home" className="flex min-h-0 flex-1 flex-col animate-fade">
+    <div key="home" className="flex min-h-0 flex-1 flex-col">
       <PaytmHomeScreen compact={compact} />
     </div>
   ) : (
@@ -160,7 +175,7 @@ export function PhoneFrame({ children, compact = false }: { children: ReactNode;
   }
   return (
     <div className="w-full max-w-[420px] shrink-0 rounded-[44px] bg-[#0B1220] p-[10px] shadow-[0_30px_80px_-20px_rgba(0,46,110,0.45)]">
-      <div className="relative flex h-[clamp(600px,calc(100dvh-148px),840px)] flex-col overflow-hidden rounded-[36px] bg-[#F4F7FA]">
+      <div className="relative flex h-[min(840px,calc(100dvh-148px))] min-h-[440px] flex-col overflow-hidden rounded-[36px] bg-[#F4F7FA] [@media(max-height:720px)]:h-[calc(100dvh-88px)]">
         <StatusBar onBlue={home} />
         {surface}
         {/* Unpositioned on purpose: portalled sheets resolve `absolute inset-0` against the phone screen. */}

@@ -48,6 +48,8 @@ export interface AppState {
   cardDetail: CardId | null;
   /** Overview privacy banner dismissed (kept for the browser session). */
   bannerDismissed: boolean;
+  /** Landing coach-mark hidden once the tile is tapped or the tour starts. */
+  coachDismissed: boolean;
   conciergeView: ConciergeView;
   scenario: ScenarioId;
   bankBalance: number;
@@ -111,6 +113,7 @@ export function createInitialState(): AppState {
     ...readHash(),
     cardDetail: null,
     bannerDismissed: readBannerDismissed(),
+    coachDismissed: false,
     bankBalance: SAVINGS_ACCOUNT.balance,
     cards: structuredClone(initialLiveCards),
     selection: { A: SCENARIOS.A.defaultInstrument, B: SCENARIOS.B.defaultInstrument, C: SCENARIOS.C.defaultInstrument },
@@ -177,7 +180,7 @@ function chargeCard(cards: LiveCards, cardId: CardId, amount: number, result?: R
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'OPEN_CARDSENSE':
-      return { ...state, surface: 'cardsense', tab: 'overview', cardDetail: null };
+      return { ...state, surface: 'cardsense', tab: 'overview', cardDetail: null, coachDismissed: true };
     case 'GO_HOME':
       return { ...state, surface: 'home', cardDetail: null };
     case 'OPEN_CARD':
@@ -315,11 +318,11 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'CLEAR_TOAST':
       return { ...state, toast: null };
     case 'RESET':
-      // Reset returns to the Paytm home screen with a clean seed.
-      return { ...createInitialState(), surface: 'home', tab: 'overview', bannerDismissed: state.bannerDismissed };
+      // Reset returns to the Paytm home screen with a clean seed; a running tour restarts at step 1.
+      return { ...createInitialState(), surface: 'home', tab: 'overview', bannerDismissed: state.bannerDismissed, tour: state.tour === null ? null : 0 };
     case 'TOUR_START':
       // The tour always starts from a clean seed on the Paytm home screen so every step behaves the same.
-      return { ...createInitialState(), surface: 'home', tab: 'overview', bannerDismissed: state.bannerDismissed, tour: 0 };
+      return { ...createInitialState(), surface: 'home', tab: 'overview', bannerDismissed: state.bannerDismissed, coachDismissed: true, tour: 0 };
     case 'TOUR_GO': {
       const step = TOUR_STEPS[action.step];
       if (!step) return { ...state, tour: null };

@@ -1,13 +1,13 @@
 import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { SAVINGS_ACCOUNT, type ScenarioId } from '../data/cardsData';
+import { DINERS_SIM_AMOUNT, SAVINGS_ACCOUNT, type ScenarioId } from '../data/cardsData';
 import { formatINR } from '../lib/format';
 import { getSafeToSpend, useApp, type Action } from '../state/appState';
 import { PrimaryButton, Sheet } from './ui';
 
 /** Seed Paytm HDFC Select statement; live `statementDue` drops to 0 once paid. */
 export const HDFC_STATEMENT = 18450;
-export const DINERS_SIM_AMOUNT = 12500;
+export { DINERS_SIM_AMOUNT };
 
 export function goCheckout(dispatch: (a: Action) => void, scenario: ScenarioId) {
   dispatch({ type: 'SET_SCENARIO', scenario });
