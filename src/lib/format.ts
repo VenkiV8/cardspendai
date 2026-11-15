@@ -11,7 +11,3 @@ export function pct(part: number, whole: number): number {
   if (whole <= 0) return 0;
   return Math.max(0, Math.min(100, (part / whole) * 100));
 }
-
-export function clock(): string {
-  return new Date().toLocaleTimeString('en-IN', { hour12: false });
-}

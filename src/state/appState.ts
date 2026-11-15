@@ -1,6 +1,7 @@
 import { createContext, useContext, type Dispatch } from 'react';
 import {
   CARDS,
+  DEMO_DATE,
   MILESTONE_VOUCHER,
   SAVINGS_ACCOUNT,
   SCENARIOS,
@@ -12,12 +13,14 @@ import {
   type ScenarioId,
   type Voucher,
 } from '../data/cardsData';
-import { clock, formatINR } from '../lib/format';
 import { computeSafeToSpend, type RouteResult, type SafeToSpend } from '../lib/routingEngine';
 import { TOUR_STEPS } from '../lib/tour';
 
-export type TabId = 'overview' | 'checkout' | 'concierge' | 'privacy';
-export type ConciergeView = 'chat' | 'vault' | 'upgrade';
+export type TabId = 'overview' | 'checkout' | 'vault' | 'privacy';
+/** Segments of the Voucher Vault tab, in display order. */
+export type ConciergeView = 'vault' | 'chat' | 'upgrade';
+/** Which app is on screen inside the phone: the Paytm home screen or CardSense AI. */
+export type Surface = 'home' | 'cardsense';
 
 export interface Txn {
   id: string;
@@ -27,12 +30,9 @@ export interface Txn {
   category: string;
   instrument: InstrumentId;
   source: 'Paytm Checkout' | 'PDF Statement' | 'Simulation' | 'BBPS';
-}
-
-export interface EventLog {
-  id: number;
-  time: string;
-  text: string;
+  date: string;
+  /** Reward + instant discount value earned, in ₹. */
+  reward: number;
 }
 
 export interface Consents {
@@ -42,7 +42,12 @@ export interface Consents {
 }
 
 export interface AppState {
+  surface: Surface;
   tab: TabId;
+  /** Card Detail page open on top of the CardSense tabs, else null. */
+  cardDetail: CardId | null;
+  /** Overview privacy banner dismissed (kept for the browser session). */
+  bannerDismissed: boolean;
   conciergeView: ConciergeView;
   scenario: ScenarioId;
   bankBalance: number;
@@ -57,37 +62,55 @@ export interface AppState {
   transactions: Txn[];
   vouchers: Voucher[];
   consents: Consents;
-  telemetryOn: boolean;
-  events: EventLog[];
   toast: string | null;
   lastIntent: string | null;
   /** Index into TOUR_STEPS while the guided tour runs, else null. */
   tour: number | null;
 }
 
-let eventSeq = 0;
-function log(state: AppState, text: string): EventLog[] {
-  eventSeq += 1;
-  return [{ id: eventSeq, time: clock(), text }, ...state.events].slice(0, 12);
+const BANNER_KEY = 'cardsense.privacyBannerDismissed';
+
+function readBannerDismissed(): boolean {
+  try {
+    return window.sessionStorage.getItem(BANNER_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
-/** Deep links for demos: #checkout/C, #concierge/vault, #privacy … */
-function readHash(): { tab: TabId; conciergeView: ConciergeView; scenario: ScenarioId } {
-  const fallback = { tab: 'overview' as TabId, conciergeView: 'chat' as ConciergeView, scenario: 'A' as ScenarioId };
+function saveBannerDismissed() {
+  try {
+    window.sessionStorage.setItem(BANNER_KEY, '1');
+  } catch {
+    /* storage blocked: dismissal still holds for this page view */
+  }
+}
+
+/**
+ * Deep links for demos skip the Paytm home screen: #overview, #checkout/C, #vault/chat, #privacy.
+ * The old #concierge link still works and opens Voucher Vault › Concierge.
+ */
+function readHash(): { surface: Surface; tab: TabId; conciergeView: ConciergeView; scenario: ScenarioId } {
+  const fallback = { surface: 'home' as Surface, tab: 'overview' as TabId, conciergeView: 'vault' as ConciergeView, scenario: 'A' as ScenarioId };
   if (typeof window === 'undefined') return fallback;
-  const [tab, sub] = window.location.hash.replace('#', '').split('/');
-  const tabs: TabId[] = ['overview', 'checkout', 'concierge', 'privacy'];
+  const [raw, sub] = window.location.hash.replace('#', '').split('/');
+  const legacyChat = raw === 'concierge';
+  const tab = legacyChat ? 'vault' : raw;
+  const tabs: TabId[] = ['overview', 'checkout', 'vault', 'privacy'];
   if (!tabs.includes(tab as TabId)) return fallback;
   return {
+    surface: 'cardsense',
     tab: tab as TabId,
-    conciergeView: (['chat', 'vault', 'upgrade'] as const).find((v) => v === sub) ?? 'chat',
-    scenario: (['A', 'B', 'C'] as const).find((s) => s === sub?.toUpperCase()) ?? 'A',
+    conciergeView: (['vault', 'chat', 'upgrade'] as const).find((v) => v === sub) ?? (legacyChat ? 'chat' : 'vault'),
+    scenario: (['A', 'B', 'C'] as const).find((x) => x === sub?.toUpperCase()) ?? 'A',
   };
 }
 
 export function createInitialState(): AppState {
   return {
     ...readHash(),
+    cardDetail: null,
+    bannerDismissed: readBannerDismissed(),
     bankBalance: SAVINGS_ACCOUNT.balance,
     cards: structuredClone(initialLiveCards),
     selection: { A: SCENARIOS.A.defaultInstrument, B: SCENARIOS.B.defaultInstrument, C: SCENARIOS.C.defaultInstrument },
@@ -100,8 +123,6 @@ export function createInitialState(): AppState {
     transactions: [],
     vouchers: [...initialVouchers],
     consents: { bbps: true, sms: true, aa: true },
-    telemetryOn: true,
-    events: [{ id: 0, time: clock(), text: 'Session started • 4 cards + 1 AA account synced' }],
     toast: null,
     lastIntent: null,
     tour: null,
@@ -109,6 +130,11 @@ export function createInitialState(): AppState {
 }
 
 export type Action =
+  | { type: 'OPEN_CARDSENSE' }
+  | { type: 'GO_HOME' }
+  | { type: 'OPEN_CARD'; card: CardId }
+  | { type: 'CLOSE_CARD' }
+  | { type: 'DISMISS_BANNER' }
   | { type: 'SET_TAB'; tab: TabId }
   | { type: 'SET_CONCIERGE_VIEW'; view: ConciergeView }
   | { type: 'SET_SCENARIO'; scenario: ScenarioId }
@@ -120,15 +146,15 @@ export type Action =
   | { type: 'PAY_BILL' }
   | { type: 'IMPORT_PDF' }
   | { type: 'TOGGLE_CONSENT'; key: keyof Consents }
-  | { type: 'TOGGLE_TELEMETRY' }
   | { type: 'SET_INTENT'; intent: string; query: string }
   | { type: 'TOAST'; message: string }
   | { type: 'CLEAR_TOAST' }
-  | { type: 'LOG'; text: string }
   | { type: 'RESET' }
   | { type: 'TOUR_START' }
   | { type: 'TOUR_GO'; step: number }
   | { type: 'TOUR_END' };
+
+const DEMO_DATE_SHORT = `${DEMO_DATE.day} ${DEMO_DATE.monthShort}`;
 
 function chargeCard(cards: LiveCards, cardId: CardId, amount: number, result?: RouteResult): LiveCards {
   const prev = cards[cardId];
@@ -150,8 +176,19 @@ function chargeCard(cards: LiveCards, cardId: CardId, amount: number, result?: R
 
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'OPEN_CARDSENSE':
+      return { ...state, surface: 'cardsense', tab: 'overview', cardDetail: null };
+    case 'GO_HOME':
+      return { ...state, surface: 'home', cardDetail: null };
+    case 'OPEN_CARD':
+      return { ...state, cardDetail: action.card };
+    case 'CLOSE_CARD':
+      return { ...state, cardDetail: null };
+    case 'DISMISS_BANNER':
+      saveBannerDismissed();
+      return { ...state, bannerDismissed: true };
     case 'SET_TAB':
-      return { ...state, tab: action.tab };
+      return { ...state, tab: action.tab, cardDetail: null };
     case 'SET_CONCIERGE_VIEW':
       return { ...state, conciergeView: action.view };
     case 'SET_SCENARIO':
@@ -165,7 +202,6 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state.appliedValue,
           [s]: action.result.instrument === SCENARIOS[s].defaultInstrument ? 0 : action.result.totalValue,
         },
-        events: log(state, `Scenario ${s}: switched to ${action.result.label} (+${formatINR(action.result.totalValue)} value)`),
       };
     }
     case 'PAY_SCENARIO': {
@@ -184,6 +220,8 @@ export function reducer(state: AppState, action: Action): AppState {
         category: sc.category,
         instrument: r.instrument,
         source: 'Paytm Checkout',
+        date: DEMO_DATE_SHORT,
+        reward: r.totalValue,
       };
       return {
         ...state,
@@ -191,7 +229,6 @@ export function reducer(state: AppState, action: Action): AppState {
         bankBalance,
         paid: { ...state.paid, [s]: true },
         transactions: [txn, ...state.transactions],
-        events: log(state, `Paid ${formatINR(r.payable)} to ${sc.merchant} via ${r.label}`),
       };
     }
     case 'NEW_PAYMENT': {
@@ -202,19 +239,29 @@ export function reducer(state: AppState, action: Action): AppState {
         selection: { ...state.selection, [s]: SCENARIOS[s].defaultInstrument },
         appliedValue: { ...state.appliedValue, [s]: 0 },
         bankedSaved: state.bankedSaved + (state.paid[s] ? state.appliedValue[s] : 0),
-        events: log(state, `Scenario ${s}: new checkout — re-routing against live caps`),
       };
     }
     case 'SIMULATE_DINERS': {
       const prev = state.cards.dinersBlack;
+      const txn: Txn = {
+        id: `txn-diners-${Date.now()}`,
+        merchant: 'Tanishq, MG Road (simulated)',
+        amount: action.amount,
+        mcc: 5944,
+        category: 'Shopping',
+        instrument: 'dinersBlack',
+        source: 'Simulation',
+        date: DEMO_DATE_SHORT,
+        reward: Math.round(action.amount * CARDS.dinersBlack.baseRate),
+      };
       return {
         ...state,
         dinersSimulated: true,
         cards: {
           ...state.cards,
-          dinersBlack: { ...prev, pending: prev.pending + action.amount, unbilled: prev.unbilled + action.amount },
+          dinersBlack: { ...prev, pending: prev.pending + action.amount, unbilled: prev.unbilled + action.amount, monthSpend: prev.monthSpend + action.amount },
         },
-        events: log(state, `Diners Black: ${formatINR(action.amount)} authorised (pending T+1…T+3 settlement)`),
+        transactions: [txn, ...state.transactions],
       };
     }
     case 'SETTLE_DINERS': {
@@ -226,8 +273,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         cards: { ...state.cards, dinersBlack: { ...prev, settled, pending: 0 } },
         vouchers: unlocked ? [MILESTONE_VOUCHER, ...state.vouchers] : state.vouchers,
-        toast: unlocked ? '🎉 ₹10,000 Diners milestone voucher unlocked — added to Vault' : state.toast,
-        events: log(state, unlocked ? 'Diners milestone ₹4,00,000 crossed on settlement date → voucher issued' : 'Diners settlement posted'),
+        toast: unlocked ? '₹10,000 Diners milestone voucher unlocked and added to Voucher Vault' : state.toast,
       };
     }
     case 'PAY_BILL': {
@@ -237,7 +283,6 @@ export function reducer(state: AppState, action: Action): AppState {
         billPaid: true,
         bankBalance: state.bankBalance - prev.statementDue,
         cards: { ...state.cards, hdfcSelect: { ...prev, statementDue: 0, dueInDays: null } },
-        events: log(state, `BBPS: Paytm HDFC Select statement ${formatINR(prev.statementDue)} paid via UPI`),
       };
     }
     case 'IMPORT_PDF': {
@@ -251,47 +296,38 @@ export function reducer(state: AppState, action: Action): AppState {
         category: 'Dining',
         instrument: 'hdfcSelect',
         source: 'PDF Statement',
+        date: DEMO_DATE_SHORT,
+        reward: Math.round(amount * CARDS.hdfcSelect.baseRate),
       };
       return {
         ...state,
         pdfImported: true,
         cards: chargeCard(state.cards, 'hdfcSelect', amount),
         transactions: [txn, ...state.transactions],
-        events: log(state, `PDF statement parsed: +${formatINR(amount)} dining (MCC 5812) on HDFC Select`),
       };
     }
-    case 'TOGGLE_CONSENT': {
-      const next = !state.consents[action.key];
-      const names: Record<keyof Consents, string> = { bbps: 'BBPS bill fetch', sms: 'On-device SMS sandbox', aa: 'Account Aggregator consent' };
-      return {
-        ...state,
-        consents: { ...state.consents, [action.key]: next },
-        events: log(state, `${names[action.key]} ${next ? 'granted' : 'revoked'}`),
-      };
-    }
-    case 'TOGGLE_TELEMETRY':
-      return { ...state, telemetryOn: !state.telemetryOn };
+    case 'TOGGLE_CONSENT':
+      return { ...state, consents: { ...state.consents, [action.key]: !state.consents[action.key] } };
     case 'SET_INTENT':
-      return { ...state, lastIntent: action.intent, events: log(state, `Concierge intent "${action.intent}" ← "${action.query.slice(0, 40)}"`) };
+      return { ...state, lastIntent: action.intent };
     case 'TOAST':
       return { ...state, toast: action.message };
     case 'CLEAR_TOAST':
       return { ...state, toast: null };
-    case 'LOG':
-      return { ...state, events: log(state, action.text) };
     case 'RESET':
-      return { ...createInitialState(), telemetryOn: state.telemetryOn, tab: state.tab, events: log(state, 'Demo state reset') };
-    case 'TOUR_START': {
-      // The tour always starts from a clean seed so every step behaves the same.
-      const fresh = createInitialState();
-      return { ...fresh, telemetryOn: state.telemetryOn, tab: 'overview', tour: 0, events: log(state, 'Guided tour started (demo state reset)') };
-    }
+      // Reset returns to the Paytm home screen with a clean seed.
+      return { ...createInitialState(), surface: 'home', tab: 'overview', bannerDismissed: state.bannerDismissed };
+    case 'TOUR_START':
+      // The tour always starts from a clean seed on the Paytm home screen so every step behaves the same.
+      return { ...createInitialState(), surface: 'home', tab: 'overview', bannerDismissed: state.bannerDismissed, tour: 0 };
     case 'TOUR_GO': {
       const step = TOUR_STEPS[action.step];
       if (!step) return { ...state, tour: null };
       return {
         ...state,
         tour: action.step,
+        surface: step.surface,
+        cardDetail: null,
         tab: step.tab,
         scenario: step.scenario ?? state.scenario,
         conciergeView: step.conciergeView ?? state.conciergeView,
@@ -317,7 +353,7 @@ export function useApp(): AppContextValue {
   return ctx;
 }
 
-/** Single source of truth for Safe-to-Spend across Overview, Privacy, Concierge and the Inspector. */
+/** Single source of truth for Safe-to-Spend across Overview, Card Detail, Privacy and the Concierge. */
 export function getSafeToSpend(state: AppState): SafeToSpend {
   return computeSafeToSpend(state.bankBalance, state.cards, state.consents);
 }

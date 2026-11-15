@@ -17,8 +17,6 @@ import {
 } from '../data/cardsData';
 import { formatINR } from './format';
 
-/** Simulated production p95 budget (network + rule match). The on-device match itself is measured with performance.now(). */
-export const ROUTING_LATENCY_MS = 38;
 export const CO_BRAND_BIAS_WEIGHT = 0;
 
 export interface Transaction {
@@ -52,8 +50,6 @@ export interface RoutingDecision {
   results: RouteResult[];
   ranked: RouteResult[];
   best: RouteResult;
-  /** Simulated production p95 latency budget. */
-  latencyMs: number;
   /** Real wall-clock time of this evaluation in the browser (performance.now()). */
   computeMs: number;
 }
@@ -239,7 +235,7 @@ export function routeTransaction(txn: Transaction, live: LiveCards): RoutingDeci
     .filter((r) => r.eligible)
     // Value-only ranking. Tie-breaker: strategic progress (lounge gate), never co-brand status.
     .sort((a, b) => b.totalValue - a.totalValue || Number(b.countsTowardLounge) - Number(a.countsTowardLounge));
-  return { results, ranked, best: ranked[0], latencyMs: ROUTING_LATENCY_MS, computeMs: now() - t0 };
+  return { results, ranked, best: ranked[0], computeMs: now() - t0 };
 }
 
 /* ------------------------------------------------------------------ */

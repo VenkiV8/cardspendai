@@ -107,7 +107,6 @@ export function UpgradeView() {
         tone="navy"
         onClick={() => {
           dispatch({ type: 'TOAST', message: 'Eligibility check started — soft pull only, no CIBIL impact' });
-          dispatch({ type: 'LOG', text: 'Upgrade: soft eligibility check for Paytm SBI Card SELECT' });
         }}
       >
         Check eligibility (soft pull, no score impact)

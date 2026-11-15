@@ -89,13 +89,12 @@ export type LiveCards = Record<CardId, CardLive>;
 export const DEMO_OFFER_NOTE = 'Demo offer data • modelled on public Paytm × issuer promo formats, not a live AU Bank offer';
 
 export const USER = {
-  name: 'Arjun Mehta',
-  firstName: 'Arjun',
-  persona: 'Multi-Card Pragmatist',
+  name: 'Venki',
+  firstName: 'Venki',
   city: 'Bengaluru',
-  upiId: 'arjunmehta@pthdfc',
-  /** Opaque random id — a name-based alias would leak identity (deck slide 5). */
-  alias: 'u8f3k2@cardsense.paytm.com',
+  upiId: 'venki@pthdfc',
+  /** Opaque random id: a name-based alias would leak identity (deck slide 5). */
+  alias: 'v8k2x@cardsense.paytm.com',
 };
 
 /** Demo "today": Friday, 27 March 2026 — 4 days before the Diners quarter closes. */
@@ -379,6 +378,8 @@ export interface Voucher {
   code: string;
   expiresInDays: number;
   kind: 'membership' | 'voucher' | 'lounge' | 'milestone';
+  /** Card that issued the perk (shown on its Card Detail page). */
+  cardId: CardId;
 }
 
 export const initialVouchers: Voucher[] = [
@@ -390,6 +391,7 @@ export const initialVouchers: Voucher[] = [
     code: 'PTMHDFC-UBR-58Q2',
     expiresInDays: 6,
     kind: 'voucher',
+    cardId: 'hdfcSelect',
   },
   {
     id: 'v-lounge',
@@ -399,15 +401,17 @@ export const initialVouchers: Voucher[] = [
     code: 'SCP-LNG-BLR-7731',
     expiresInDays: 4,
     kind: 'lounge',
+    cardId: 'scapia',
   },
   {
     id: 'v-first',
     title: 'Paytm First Annual Membership',
     issuer: 'Paytm HDFC Select • Welcome benefit',
     value: '₹750',
-    code: 'PFIRST-12M-ARJ9',
+    code: 'PFIRST-12M-VNK9',
     expiresInDays: 41,
     kind: 'membership',
+    cardId: 'hdfcSelect',
   },
 ];
 
@@ -419,6 +423,7 @@ export const MILESTONE_VOUCHER: Voucher = {
   code: 'DCB-MRT-Q4-10K',
   expiresInDays: 90,
   kind: 'milestone',
+  cardId: 'dinersBlack',
 };
 
 export const UPGRADE_AUDIT = {

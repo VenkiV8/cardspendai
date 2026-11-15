@@ -43,7 +43,6 @@ function VoucherCard({ v }: { v: Voucher }) {
       /* clipboard may be blocked in some embeds — still show confirmation of the code */
     }
     setCopied(true);
-    dispatch({ type: 'LOG', text: `Vault: copied code ${v.code}` });
     window.setTimeout(() => setCopied(false), 1600);
   };
 
@@ -76,7 +75,6 @@ function VoucherCard({ v }: { v: Voucher }) {
           className="!px-2.5 !py-1 !text-[10.5px]"
           onClick={() => {
             dispatch({ type: 'TOAST', message: `Opening ${v.title.split(' ').slice(0, 3).join(' ')} on Paytm…` });
-            dispatch({ type: 'LOG', text: `Vault: redeem deep link → ${v.id}` });
           }}
         >
           Redeem on Paytm <ExternalLink size={11} />

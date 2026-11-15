@@ -3,6 +3,7 @@ import {
   Armchair,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clock,
   FastForward,
   Info,
@@ -10,38 +11,63 @@ import {
   Lock,
   Plane,
   ShieldCheck,
-  Sparkles,
+  X,
   Zap,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { BillPaySheet, DINERS_SIM_AMOUNT, HDFC_STATEMENT, goCheckout, goVault, useDinersFlow } from '../components/cardActions';
+import { InfoTip } from '../components/InfoTip';
 import { useTourTarget } from '../components/Tour';
-import { CardArt, Badge, Card, Meter, PrimaryButton, SectionTitle, Sheet } from '../components/ui';
-import { CARDS, CARD_ORDER, DEMO_DATE, SAVINGS_ACCOUNT, SCENARIOS, USER, type CardId } from '../data/cardsData';
+import { CardArt, Meter, PrimaryButton, SectionTitle } from '../components/ui';
+import { CARDS, CARD_ORDER, DEMO_DATE, SAVINGS_ACCOUNT, USER, type CardId } from '../data/cardsData';
 import { formatINR, pct } from '../lib/format';
 import { dinersStatus, totalBilledDue, utilityCapStatus } from '../lib/routingEngine';
 import { getSafeToSpend, useApp, type AppState } from '../state/appState';
 
 export function OverviewScreen() {
   return (
-    <div className="space-y-5 px-4 pb-6 pt-4">
-      <Greeting />
-      <SafeToSpendHero />
-      <UrgentActions />
-      <PortfolioStack />
+    <div>
+      <PrivacyBanner />
+      <div className="space-y-5 px-4 pb-6 pt-4">
+        <Greeting />
+        <SafeToSpendHero />
+        <UrgentActions />
+        <PortfolioStack />
+      </div>
+    </div>
+  );
+}
+
+/** Slim, dismissible trust strip. Full detail lives on the Data & Privacy tab. */
+function PrivacyBanner() {
+  const { state, dispatch } = useApp();
+  if (state.bannerDismissed) return null;
+  return (
+    <div className="flex h-7 items-center gap-1.5 bg-[#001F4D] pl-3 pr-1 text-white">
+      <ShieldCheck size={12} className="shrink-0 text-[#7FDBFF]" aria-hidden />
+      <button
+        onClick={() => dispatch({ type: 'SET_TAB', tab: 'privacy' })}
+        className="min-w-0 flex-1 truncate text-left text-[10px] font-semibold tracking-wide hover:underline"
+        title="Open Data & Privacy"
+      >
+        Zero Gmail access · DPDP compliant · Your data stays on your device
+      </button>
+      <button
+        onClick={() => dispatch({ type: 'DISMISS_BANNER' })}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+        aria-label="Dismiss privacy banner"
+      >
+        <X size={13} />
+      </button>
     </div>
   );
 }
 
 function Greeting() {
   return (
-    <div className="flex items-end justify-between gap-2 px-1">
-      <div>
-        <p className="text-[11px] font-medium text-slate-500">{DEMO_DATE.label}</p>
-        <h2 className="text-[18px] font-extrabold tracking-tight text-[#002E6E]">Hi {USER.firstName} 👋</h2>
-      </div>
-      <Badge tone="navy">
-        <Sparkles size={11} /> {USER.persona}
-      </Badge>
+    <div className="px-1">
+      <p className="text-[11px] font-medium text-slate-500">{DEMO_DATE.label}</p>
+      <h2 className="text-[18px] font-extrabold tracking-tight text-[#002E6E]">Hi {USER.firstName}</h2>
     </div>
   );
 }
@@ -186,7 +212,7 @@ function deadlineLabel(days: number): string {
   if (!Number.isFinite(days)) return 'Done';
   if (days <= 0) return 'Today';
   if (days === 1) return 'Tomorrow';
-  return `${days} days left`;
+  return `${days} days`;
 }
 
 /** Stacked (not swiped) so no card is missed; sorted by deadline, resolved items sink to the bottom. */
@@ -223,33 +249,72 @@ function UrgentActions() {
 
 type ShellTone = 'amber' | 'emerald' | 'crimson' | 'cyan';
 
-function AlertShell({ tone, days, children }: { tone: ShellTone; days: number; children: ReactNode }) {
-  const border: Record<ShellTone, string> = { amber: 'border-[#D97706]/35', emerald: 'border-[#16A34A]/35', crimson: 'border-[#EC184A]/35', cyan: 'border-[#00B9F1]/40' };
-  const stripe: Record<ShellTone, string> = { amber: 'bg-[#D97706]', emerald: 'bg-[#16A34A]', crimson: 'bg-[#EC184A]', cyan: 'bg-[#00B9F1]' };
+const SHELL: Record<ShellTone, { border: string; stripe: string; icon: string }> = {
+  amber: { border: 'border-[#D97706]/35', stripe: 'bg-[#D97706]', icon: 'bg-[#D97706]/10 text-[#B45309]' },
+  emerald: { border: 'border-[#16A34A]/35', stripe: 'bg-[#16A34A]', icon: 'bg-[#16A34A]/10 text-[#15803D]' },
+  crimson: { border: 'border-[#EC184A]/35', stripe: 'bg-[#EC184A]', icon: 'bg-[#EC184A]/10 text-[#C8103C]' },
+  cyan: { border: 'border-[#00B9F1]/40', stripe: 'bg-[#00B9F1]', icon: 'bg-[#00B9F1]/10 text-[#0089B3]' },
+};
+
+/** Minimal alert: icon + short title, urgency chip, one headline, one button, and an "i" for the detail. */
+function AlertCard({
+  tone,
+  days,
+  icon,
+  title,
+  headline,
+  info,
+  children,
+}: {
+  tone: ShellTone;
+  days: number;
+  icon: ReactNode;
+  title: string;
+  headline: string;
+  info: ReactNode;
+  children: ReactNode;
+}) {
+  const resolved = !Number.isFinite(days);
+  const s = SHELL[tone];
   return (
-    <div className={`relative overflow-hidden rounded-2xl border bg-white p-4 ${border[tone]} ${Number.isFinite(days) ? '' : 'opacity-85'}`}>
-      <div className={`absolute inset-y-0 left-0 w-1 ${stripe[tone]}`} />
-      {children}
+    <div className={`relative rounded-2xl border bg-white p-3.5 pl-4 ${s.border} ${resolved ? 'opacity-85' : ''}`}>
+      <div className={`absolute bottom-3 left-0 top-3 w-1 rounded-r-full ${s.stripe}`} aria-hidden />
+      <div className="flex items-start gap-2.5">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${s.icon}`} aria-hidden>
+          {icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className="truncate text-[11.5px] font-bold text-slate-500">{title}</p>
+            <span
+              className={`shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9.5px] font-bold ${
+                resolved ? 'bg-[#16A34A]/10 text-[#15803D]' : days <= 2 ? 'bg-[#EC184A] text-white' : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {deadlineLabel(days)}
+            </span>
+          </div>
+          <p className="tabular mt-0.5 text-[14.5px] font-extrabold leading-snug text-[#002E6E]">{headline}</p>
+        </div>
+        <InfoTip label={`More about ${title}`} title={title}>
+          {info}
+        </InfoTip>
+      </div>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
 
-function AlertHeader({ badge, meta, days }: { badge: ReactNode; meta: string; days: number }) {
-  const resolved = !Number.isFinite(days);
+function InfoList({ items }: { items: ReactNode[] }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      {badge}
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate text-[10px] font-semibold text-slate-400">{meta}</span>
-        <span
-          className={`shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9.5px] font-bold ${
-            resolved ? 'bg-[#16A34A]/10 text-[#15803D]' : days <= 2 ? 'bg-[#EC184A] text-white' : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          {deadlineLabel(days)}
-        </span>
-      </span>
-    </div>
+    <ul className="space-y-1.5">
+      {items.map((t, i) => (
+        <li key={i} className="flex gap-1.5">
+          <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[#00B9F1]" aria-hidden />
+          <span>{t}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -257,205 +322,124 @@ function SettlementAlert({ days }: { days: number }) {
   const { state, dispatch } = useApp();
   const tour = useTourTarget('simulate');
   const d = dinersStatus(state.cards);
-  const [settling, setSettling] = useState(false);
-  const simAmount = 12500;
+  const { simulate, settle, settling } = useDinersFlow();
 
-  const settle = () => {
-    setSettling(true);
-    window.setTimeout(() => {
-      dispatch({ type: 'SETTLE_DINERS' });
-      setSettling(false);
-    }, 1200);
-  };
+  const headline = d.unlocked ? '₹10,000 voucher unlocked' : d.pending > 0 ? `${formatINR(d.pending)} settling by 31 Mar` : `Spend ${formatINR(d.settledGap)} by 28 Mar`;
 
   return (
-    <AlertShell tone={d.unlocked ? 'emerald' : 'amber'} days={days}>
-      <AlertHeader
-        days={days}
-        meta="Diners Black •••9014"
-        badge={
-          <Badge tone={d.unlocked ? 'emerald' : 'amber'}>
-            {d.unlocked ? <CheckCircle2 size={11} /> : <Clock size={11} />}
-            {d.unlocked ? 'Milestone Unlocked' : '72-Hr Settlement Buffer'}
-          </Badge>
-        }
-      />
-      <p className="mt-2 text-[12.5px] font-semibold leading-snug text-[#002E6E]">
-        {d.unlocked ? (
-          <>₹4,00,000 crossed on settlement date. Your ₹10,000 Marriott/flight voucher is in the Vault.</>
-        ) : d.pending > 0 ? (
-          <>{formatINR(d.pending)} authorised and awaiting T+1…T+3 merchant settlement. The bank counts the settlement date, not the swipe date.</>
-        ) : (
-          <>
-            Spend {formatINR(d.settledGap)} by March 28 (3 days before the Mar 31 cutoff) so T+3 merchant settlement clears in time for your ₹10,000 milestone voucher.
-          </>
-        )}
-      </p>
-      <div className="mt-3">
-        <Meter
-          max={d.target}
-          height="h-2.5"
-          segments={[
-            { value: d.settled, tone: d.unlocked ? 'emerald' : 'navy' },
-            { value: d.pending, tone: 'amber', striped: true },
-          ]}
-        />
-        <div className="mt-1.5 flex justify-between text-[10.5px]">
-          <span className="text-slate-500">
-            Settled <b className="tabular text-[#002E6E]">{formatINR(d.settled)}</b>
-            {d.pending > 0 && (
+    <AlertCard
+      tone={d.unlocked ? 'emerald' : 'amber'}
+      days={days}
+      icon={d.unlocked ? <CheckCircle2 size={18} /> : <Clock size={18} />}
+      title="72-Hour Settlement Buffer"
+      headline={headline}
+      info={
+        <>
+          <InfoList
+            items={[
+              <>HDFC Diners Black counts the merchant settlement date (T+1 to T+3), not the swipe date.</>,
+              <>The Q4 milestone quarter closes on 31 Mar, so spend must land by 28 Mar to settle in time.</>,
               <>
-                {' '}
-                • Pending <b className="tabular text-[#D97706]">{formatINR(d.pending)}</b>
-              </>
-            )}
-          </span>
-          <span className="tabular font-semibold text-slate-500">/ {formatINR(d.target)}</span>
-        </div>
-      </div>
-      <div ref={tour.ref} className={`mt-3 ${tour.className}`}>
+                Settled <b className="tabular text-[#002E6E]">{formatINR(d.settled)}</b> of <b className="tabular text-[#002E6E]">{formatINR(d.target)}</b>
+                {d.pending > 0 && (
+                  <>
+                    , with <b className="tabular text-[#D97706]">{formatINR(d.pending)}</b> pending settlement
+                  </>
+                )}
+                .
+              </>,
+              <>
+                At stake: the <b className="text-[#002E6E]">₹10,000 Marriott / flight voucher</b>.
+              </>,
+            ]}
+          />
+          <div className="mt-2.5">
+            <Meter
+              max={d.target}
+              height="h-2"
+              segments={[
+                { value: d.settled, tone: d.unlocked ? 'emerald' : 'navy' },
+                { value: d.pending, tone: 'amber', striped: true },
+              ]}
+            />
+            <p className="tabular mt-1 text-[10.5px] text-slate-500">
+              {formatINR(d.settled + d.pending)} / {formatINR(d.target)}
+              {d.pending > 0 ? ' • striped = pending settlement' : ''}
+            </p>
+          </div>
+        </>
+      }
+    >
+      <div ref={tour.ref} className={tour.className}>
         {!state.dinersSimulated ? (
-          <PrimaryButton tone="amber" onClick={() => dispatch({ type: 'SIMULATE_DINERS', amount: simAmount })} className="w-full">
-            <Zap size={13} /> Simulate {formatINR(simAmount)} Spend
+          <PrimaryButton tone="amber" onClick={simulate} className="w-full">
+            <Zap size={13} /> Simulate {formatINR(DINERS_SIM_AMOUNT)} spend
           </PrimaryButton>
         ) : d.pending > 0 ? (
           <PrimaryButton tone="navy" onClick={settle} disabled={settling} className="w-full">
             {settling ? <Loader2 size={13} className="animate-spin" /> : <FastForward size={13} />}
-            {settling ? 'Posting settlement…' : 'Fast-forward T+3 settlement (31 Mar)'}
+            {settling ? 'Posting settlement…' : 'Fast-forward T+3 settlement'}
           </PrimaryButton>
         ) : (
-          <PrimaryButton
-            tone="emerald"
-            onClick={() => {
-              dispatch({ type: 'SET_TAB', tab: 'concierge' });
-              dispatch({ type: 'SET_CONCIERGE_VIEW', view: 'vault' });
-            }}
-            className="w-full"
-          >
+          <PrimaryButton tone="emerald" onClick={() => goVault(dispatch)} className="w-full">
             <Plane size={13} /> View voucher in Vault
           </PrimaryButton>
         )}
       </div>
-    </AlertShell>
+    </AlertCard>
   );
 }
 
 function BillAlert({ days }: { days: number }) {
-  const { state, dispatch } = useApp();
+  const { state } = useApp();
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<'confirm' | 'processing' | 'done'>('confirm');
-  const due = 18450; // seed statement; state.cards.hdfcSelect.statementDue drops to 0 once paid
-  const { safe } = getSafeToSpend(state);
-
-  const pay = () => {
-    setStep('processing');
-    window.setTimeout(() => {
-      dispatch({ type: 'PAY_BILL' });
-      setStep('done');
-    }, 1300);
-  };
-
-  const close = () => {
-    setOpen(false);
-    window.setTimeout(() => setStep('confirm'), 200);
-  };
-
   return (
-    <AlertShell tone="emerald" days={days}>
-      <AlertHeader
-        days={days}
-        meta="BBPS • HDFC Select"
-        badge={
-          <Badge tone="emerald">
-            <ShieldCheck size={11} /> RBI Grace Shield
-          </Badge>
-        }
-      />
-      {state.billPaid ? (
-        <p className="mt-2 text-[12.5px] font-semibold leading-snug text-[#002E6E]">Statement of {formatINR(due)} paid via BBPS. Next statement generates on 15 Apr.</p>
-      ) : (
-        <p className="mt-2 text-[12.5px] font-semibold leading-snug text-[#002E6E]">
-          Paytm HDFC Select: {formatINR(due)} due in 2 days. Covered by the mandatory 3-day grace window in RBI Master Direction Para 23(5).
-        </p>
-      )}
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        {[
-          ['Due date', '29 Mar'],
-          ['Grace till', '1 Apr'],
-          ['Late fee now', '₹0'],
-        ].map(([k, v]) => (
-          <div key={k} className="rounded-lg bg-[#F4F7FA] py-1.5">
-            <p className="text-[9.5px] text-slate-500">{k}</p>
-            <p className="text-[12px] font-bold text-[#002E6E]">{v}</p>
+    <AlertCard
+      tone="emerald"
+      days={days}
+      icon={<ShieldCheck size={18} />}
+      title="RBI Grace Shield"
+      headline={state.billPaid ? `${formatINR(HDFC_STATEMENT)} paid via BBPS` : `${formatINR(HDFC_STATEMENT)} due 29 Mar`}
+      info={
+        <>
+          <div className="mb-2 grid grid-cols-3 gap-1.5 text-center">
+            {[
+              ['Due date', '29 Mar'],
+              ['Grace till', '1 Apr'],
+              ['Late fee now', '₹0'],
+            ].map(([k, v]) => (
+              <div key={k} className="rounded-lg bg-[#F4F7FA] py-1.5">
+                <p className="text-[9.5px] text-slate-500">{k}</p>
+                <p className="text-[12px] font-bold text-[#002E6E]">{v}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <PrimaryButton tone="emerald" className="mt-3 w-full" onClick={() => setOpen(true)} disabled={state.billPaid}>
+          <InfoList
+            items={[
+              <>Paytm HDFC Select statement of {formatINR(HDFC_STATEMENT)} is due on 29 Mar.</>,
+              <>RBI Master Direction Para 23(5) gives a 3-day grace window: no late fee or bureau report until 1 Apr.</>,
+              <>
+                Missing the due date still breaks the <b className="text-[#002E6E]">interest-free period</b>, so interest (~42% p.a.) runs from each purchase date.
+              </>,
+            ]}
+          />
+          {state.billPaid && <p className="mt-2 font-semibold text-[#15803D]">Paid via BBPS. Next statement generates on 15 Apr.</p>}
+        </>
+      }
+    >
+      <PrimaryButton tone="emerald" className="w-full" onClick={() => setOpen(true)} disabled={state.billPaid}>
         {state.billPaid ? (
           <>
             <CheckCircle2 size={13} /> Paid
           </>
         ) : (
           <>
-            <Zap size={13} /> 1-Tap Pay via UPI
+            <Zap size={13} /> Pay via UPI
           </>
         )}
       </PrimaryButton>
-
-      <Sheet open={open} onClose={close} title={step === 'done' ? undefined : 'Confirm bill payment'}>
-        {step === 'done' ? (
-          <div className="flex flex-col items-center py-4 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#16A34A] text-white animate-pop">
-              <CheckCircle2 size={34} />
-            </div>
-            <p className="mt-3 text-[17px] font-extrabold text-[#002E6E]">Bill Paid • {formatINR(due)}</p>
-            <p className="mt-1 text-[12px] text-slate-500">BBPS Ref BBPS2603271847 • Credited to HDFC Bank instantly</p>
-            <p className="mt-2 text-[11.5px] text-slate-500">
-              AA balance now <b className="tabular text-[#002E6E]">{formatINR(state.bankBalance)}</b> • Safe-to-Spend unchanged at{' '}
-              <b className="tabular text-[#002E6E]">{safe === null ? '—' : formatINR(safe)}</b>
-            </p>
-            <PrimaryButton className="mt-5 w-full" onClick={close}>
-              Done
-            </PrimaryButton>
-          </div>
-        ) : (
-          <div>
-            <div className="rounded-2xl border border-[#E2E8F0] p-3">
-              <Row k="Biller" v="HDFC Bank Credit Card (BBPS)" />
-              <Row k="Card" v="Paytm HDFC Select •••• 4821" />
-              <Row k="Amount" v={formatINR(due)} bold />
-              <Row k="Pay from" v={`HDFC Savings ${SAVINGS_ACCOUNT.masked} • UPI`} />
-              <Row k="Convenience fee" v="₹0" />
-            </div>
-            <p className="mt-3 flex items-start gap-1.5 text-[11px] text-slate-500">
-              <ShieldCheck size={13} className="mt-0.5 shrink-0 text-[#16A34A]" />
-              Paying now keeps your interest-free period. Even if delayed, no late fee applies until 3 days past due (RBI MD Para 23(5)).
-            </p>
-            <p className="mt-1.5 text-[10.5px] text-slate-400">
-              Safe-to-Spend stays at {safe === null ? '—' : formatINR(safe)}. This bill is already reserved in it, so paying lowers “AA balance” and “Bill due” by the same amount.
-            </p>
-            <PrimaryButton tone="emerald" className="mt-4 w-full py-3 text-[13px]" onClick={pay} disabled={step === 'processing'}>
-              {step === 'processing' ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" /> Authorising UPI…
-                </>
-              ) : (
-                <>Pay {formatINR(due)} via UPI</>
-              )}
-            </PrimaryButton>
-          </div>
-        )}
-      </Sheet>
-    </AlertShell>
-  );
-}
-
-function Row({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
-  return (
-    <div className="flex items-center justify-between py-1 text-[12px]">
-      <span className="text-slate-500">{k}</span>
-      <span className={`tabular text-right text-[#002E6E] ${bold ? 'text-[14px] font-extrabold' : 'font-semibold'}`}>{v}</span>
-    </div>
+      <BillPaySheet open={open} onClose={() => setOpen(false)} />
+    </AlertCard>
   );
 }
 
@@ -464,46 +448,39 @@ function CapAlert({ days }: { days: number }) {
   const cap = utilityCapStatus(state.cards);
   const exhausted = cap.remaining <= 0.5;
   return (
-    <AlertShell tone="crimson" days={days}>
-      <AlertHeader
-        days={days}
-        meta="HDFC Select •••4821"
-        badge={
-          <Badge tone="crimson">
-            <AlertTriangle size={11} /> {exhausted ? 'Cap Exhausted' : `Cap ${Math.round(cap.pct)}% Full`}
-          </Badge>
-        }
-      />
-      <p className="mt-2 text-[12.5px] font-semibold leading-snug text-[#002E6E]">
-        {exhausted ? (
-          <>March's 3% Utility/Recharge cap is fully used. CardSense now routes utility bills to the best remaining option until 1 Apr.</>
-        ) : (
-          <>
-            Paytm HDFC 3% monthly cap is {Math.round(cap.pct)}% full. Only {formatINR(cap.remaining)} cashback ({formatINR(cap.remainingSpend)} of spend) is left in March's calendar-month
-            Utility/Recharge cap.
-          </>
-        )}
-      </p>
-      <div className="mt-3">
-        <Meter max={cap.cap} height="h-2.5" segments={[{ value: cap.used, tone: 'crimson' }]} />
-        <div className="mt-1.5 flex justify-between text-[10.5px] text-slate-500">
-          <span>
-            <b className="tabular text-[#EC184A]">{formatINR(cap.used)}</b> / {formatINR(cap.cap)} cashback
-          </span>
-          <span>Saturates at {formatINR(cap.saturationSpend)} spend</span>
-        </div>
-      </div>
-      <PrimaryButton
-        tone="crimson"
-        className="mt-3 w-full"
-        onClick={() => {
-          dispatch({ type: 'SET_SCENARIO', scenario: 'A' });
-          dispatch({ type: 'SET_TAB', tab: 'checkout' });
-        }}
-      >
-        See smart routing for next bill
+    <AlertCard
+      tone="crimson"
+      days={days}
+      icon={<AlertTriangle size={18} />}
+      title="Cap alert • HDFC Select"
+      headline={exhausted ? '3% cap fully used' : `3% cap ${Math.round(cap.pct)}% used`}
+      info={
+        <>
+          <InfoList
+            items={[
+              <>
+                <b className="tabular text-[#002E6E]">{formatINR(cap.used)}</b> of {formatINR(cap.cap)} Utility/Recharge cashback used this month.
+              </>,
+              exhausted ? (
+                <>The cap is full. CardSense routes utility bills to the next-best card until it resets.</>
+              ) : (
+                <>
+                  Only <b className="tabular text-[#002E6E]">{formatINR(cap.remainingSpend)}</b> of spend left at 3% in March.
+                </>
+              ),
+              <>It is a calendar-month cap, so it resets on 1 Apr (not on the statement date).</>,
+            ]}
+          />
+          <div className="mt-2.5">
+            <Meter max={cap.cap} height="h-2" segments={[{ value: cap.used, tone: 'crimson' }]} />
+          </div>
+        </>
+      }
+    >
+      <PrimaryButton tone="crimson" className="w-full" onClick={() => goCheckout(dispatch, 'A')}>
+        See smart routing
       </PrimaryButton>
-    </AlertShell>
+    </AlertCard>
   );
 }
 
@@ -512,195 +489,85 @@ function LoungeAlert({ days }: { days: number }) {
   const gate = CARDS.scapia.loungeGate!;
   const spend = state.cards.scapia.monthSpend;
   const short = Math.max(0, gate.monthlyTarget - spend);
-  const b = SCENARIOS.B;
-  const routed = state.paid.B;
+  const excluded = CARDS.scapia.exclusions.map((e) => e.label.toLowerCase());
   return (
-    <AlertShell tone={short ? 'cyan' : 'emerald'} days={days}>
-      <AlertHeader
-        days={days}
-        meta="Scapia RuPay •••3319"
-        badge={
-          <Badge tone={short ? 'cyan' : 'emerald'}>
-            {short ? <Armchair size={11} /> : <CheckCircle2 size={11} />} {short ? 'Lounge Gate' : 'Lounge Unlocked'}
-          </Badge>
-        }
-      />
-      <p className="mt-2 text-[12.5px] font-semibold leading-snug text-[#002E6E]">
-        {short ? (
-          <>{formatINR(short)} short of April's unlimited domestic lounge access. Eligible Scapia spend must land by 31 Mar.</>
-        ) : (
-          <>March eligible spend crossed {formatINR(gate.monthlyTarget)}. Unlimited domestic lounge access is unlocked for April.</>
-        )}
-      </p>
-      <div className="mt-3">
-        <Meter max={gate.monthlyTarget} height="h-2.5" segments={[{ value: spend, tone: short ? 'cyan' : 'emerald' }]} />
-        <div className="mt-1.5 flex justify-between text-[10.5px] text-slate-500">
-          <span>
-            <b className="tabular text-[#002E6E]">{formatINR(spend)}</b> / {formatINR(gate.monthlyTarget)} March eligible spend
-          </span>
-          {short > 0 && <span className="tabular font-semibold text-[#0089B3]">Shortfall {formatINR(short)}</span>}
-        </div>
-      </div>
-      <PrimaryButton
-        tone="cyan"
-        className="mt-3 w-full"
-        disabled={!short}
-        onClick={() => {
-          dispatch({ type: 'SET_SCENARIO', scenario: 'B' });
-          dispatch({ type: 'SET_TAB', tab: 'checkout' });
-        }}
-      >
+    <AlertCard
+      tone={short ? 'cyan' : 'emerald'}
+      days={days}
+      icon={short ? <Armchair size={18} /> : <CheckCircle2 size={18} />}
+      title="Lounge gate • Scapia"
+      headline={short ? `${formatINR(short)} short for lounge` : 'April lounge unlocked'}
+      info={
+        <>
+          <InfoList
+            items={[
+              <>
+                <b className="tabular text-[#002E6E]">{formatINR(spend)}</b> of {formatINR(gate.monthlyTarget)} eligible March spend on Scapia RuPay.
+              </>,
+              short ? <>{Number.isFinite(days) ? days : 0} days left: eligible spend must land by 31 Mar.</> : <>{gate.perk} is unlocked.</>,
+              <>
+                {excluded.slice(0, -1).join(', ')} and {excluded[excluded.length - 1]} do not count toward the gate.
+              </>,
+            ]}
+          />
+          <div className="mt-2.5">
+            <Meter max={gate.monthlyTarget} height="h-2" segments={[{ value: spend, tone: short ? 'cyan' : 'emerald' }]} />
+          </div>
+        </>
+      }
+    >
+      <PrimaryButton tone="cyan" className="w-full" disabled={!short} onClick={() => goCheckout(dispatch, 'B')}>
         {!short ? (
           <>
             <CheckCircle2 size={13} /> Unlocked
           </>
-        ) : routed ? (
+        ) : state.paid.B ? (
           'Open Smart Checkout'
         ) : (
-          `Route ${b.merchant} QR to Scapia`
+          'Route a QR to Scapia'
         )}
       </PrimaryButton>
-    </AlertShell>
+    </AlertCard>
   );
 }
 
 /* ------------------------------------------------------------------ */
 
 function PortfolioStack() {
-  const [openId, setOpenId] = useState<CardId | null>('hdfcSelect');
   return (
     <section>
-      <SectionTitle right={<span className="text-[10.5px] font-semibold text-slate-400">4 cards</span>}>Portfolio</SectionTitle>
-      <div className="space-y-2.5">
+      <SectionTitle right={<span className="text-[10.5px] font-semibold text-slate-400">4 cards • tap for details</span>}>Portfolio</SectionTitle>
+      <div className="space-y-2">
         {CARD_ORDER.map((id) => (
-          <PortfolioCard key={id} id={id} open={openId === id} onToggle={() => setOpenId(openId === id ? null : id)} />
+          <PortfolioRow key={id} id={id} />
         ))}
       </div>
     </section>
   );
 }
 
-function PortfolioCard({ id, open, onToggle }: { id: CardId; open: boolean; onToggle: () => void }) {
-  const { state } = useApp();
+function PortfolioRow({ id }: { id: CardId }) {
+  const { state, dispatch } = useApp();
   const card = CARDS[id];
   const live = state.cards[id];
-
   return (
-    <Card className="overflow-hidden">
-      <button onClick={onToggle} className="flex w-full items-center gap-3 p-3 text-left" aria-expanded={open}>
-        <CardArt card={card} compact />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-bold text-[#002E6E]">{card.shortName}</p>
-          <p className="truncate text-[10.5px] text-slate-500">
-            {card.network} •••• {card.last4} • {card.capCycle} caps
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="tabular text-[13px] font-bold text-[#002E6E]">{formatINR(live.unbilled)}</p>
-          <p className="text-[9.5px] text-slate-400">unbilled</p>
-        </div>
-        <ChevronDown size={16} className={`shrink-0 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="space-y-3 border-t border-[#E2E8F0] px-3 pb-3.5 pt-3 animate-fadeIn">
-          <CardArt card={card} />
-          <CardMeters id={id} />
-          <div className="flex flex-wrap gap-1.5">
-            {card.coBranded && <Badge tone="cyan">Paytm co-brand</Badge>}
-            {card.exclusions.map((e) => (
-              <Badge key={e.mcc} tone="crimson">
-                0% {e.label} ({e.mcc})
-              </Badge>
-            ))}
-            {card.offers.map((o) => (
-              <Badge key={o.id} tone="emerald">
-                {o.label} • demo
-              </Badge>
-            ))}
-            {id === 'scapia' && <Badge tone="navy">UPI {card.upiHandle}</Badge>}
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-type MeterTone = 'navy' | 'cyan' | 'crimson' | 'amber' | 'emerald';
-
-function MeterRow({
-  label,
-  value,
-  max,
-  tone,
-  right,
-  segments,
-}: {
-  label: string;
-  value?: number;
-  max: number;
-  tone?: MeterTone;
-  right: string;
-  segments?: Array<{ value: number; tone: MeterTone; striped?: boolean }>;
-}) {
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between gap-2 text-[11px]">
-        <span className="font-semibold text-[#002E6E]">{label}</span>
-        <span className="tabular shrink-0 text-slate-500">{right}</span>
+    <button
+      onClick={() => dispatch({ type: 'OPEN_CARD', card: id })}
+      className="group flex w-full items-center gap-3 rounded-2xl border border-[#E2E8F0] bg-white p-3 text-left transition hover:border-[#00B9F1]/60 hover:bg-[#F8FBFD] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00B9F1]"
+      aria-label={`Open ${card.shortName} card details`}
+    >
+      <CardArt card={card} compact />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-bold text-[#002E6E]">{card.shortName}</p>
+        <p className="truncate text-[10.5px] text-slate-500">
+          {card.network} •••• {card.last4} • {card.capCycle} caps
+        </p>
       </div>
-      <Meter max={max} segments={segments ?? [{ value: value ?? 0, tone: tone ?? 'cyan' }]} />
-    </div>
-  );
-}
-
-function CardMeters({ id }: { id: CardId }) {
-  const { state } = useApp();
-  const card = CARDS[id];
-  const live = state.cards[id];
-
-  if (id === 'hdfcSelect') {
-    const util = utilityCapStatus(state.cards);
-    const travel = card.rules.find((r) => r.id === 'travelMovies')!;
-    const tUsed = live.capUsed.travelMovies ?? 0;
-    return (
-      <div className="space-y-2.5">
-        <MeterRow label="Calendar-Month Cap • 3% Utility/Recharge" value={util.used} max={util.cap} tone={util.pct >= 90 ? 'crimson' : 'cyan'} right={`${formatINR(util.used)} / ${formatINR(util.cap)}`} />
-        <MeterRow label="Calendar-Month Cap • 5% Travel/Movies" value={tUsed} max={travel.monthlyCap!} tone="cyan" right={`${formatINR(tUsed)} / ${formatINR(travel.monthlyCap!)}`} />
-        <div className="flex justify-between rounded-xl bg-[#F4F7FA] px-3 py-2 text-[11px]">
-          <span className="text-slate-500">Statement due</span>
-          <span className="font-bold text-[#002E6E]">{live.statementDue ? `${formatINR(live.statementDue)} • in ${live.dueInDays} days` : 'Paid ✓'}</span>
-        </div>
+      <div className="text-right">
+        <p className="tabular text-[13px] font-bold text-[#002E6E]">{formatINR(live.unbilled)}</p>
+        <p className="text-[9.5px] text-slate-400">unbilled</p>
       </div>
-    );
-  }
-  if (id === 'dinersBlack') {
-    const d = dinersStatus(state.cards);
-    return (
-      <MeterRow
-        label="Settled vs. Unsettled Milestone (Q4, ends 31 Mar)"
-        max={d.target}
-        right={`${formatINR(d.settled + d.pending)} / ${formatINR(d.target)}`}
-        segments={[
-          { value: d.settled, tone: d.unlocked ? 'emerald' : 'navy' },
-          { value: d.pending, tone: 'amber', striped: true },
-        ]}
-      />
-    );
-  }
-  if (id === 'scapia') {
-    const gate = card.loungeGate!;
-    const short = Math.max(0, gate.monthlyTarget - live.monthSpend);
-    return (
-      <div className="space-y-2">
-        <MeterRow label="Lounge Spend-Gate Meter (March)" value={live.monthSpend} max={gate.monthlyTarget} tone={short ? 'amber' : 'emerald'} right={`${formatINR(live.monthSpend)} / ${formatINR(gate.monthlyTarget)}`} />
-        <p className="text-[10.5px] text-slate-500">{short ? `${formatINR(short)} short of unlocking April's unlimited domestic lounge access.` : 'April lounge access unlocked ✓'}</p>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-xl bg-[#F4F7FA] px-3 py-2 text-[11px] text-slate-600">
-      <b className="text-[#16A34A]">Paytm offer:</b> 12% Instant Discount up to ₹5,000 on Paytm Domestic Flights (min txn ₹10,000). Rewards add-on not activated.
-      <span className="mt-1 block text-[10px] font-semibold text-[#B45309]">{CARDS.auLit.offers[0].sourceNote}</span>
-    </div>
+      <ChevronRight size={16} className="shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-[#00B9F1]" />
+    </button>
   );
 }

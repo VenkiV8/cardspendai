@@ -78,7 +78,7 @@ export function ChatView() {
         <div className="flex gap-2">
           <BotAvatar />
           <div className="max-w-[85%] rounded-2xl rounded-tl-md border border-[#E2E8F0] bg-white px-3 py-2.5 text-[12.5px] leading-relaxed text-[#002E6E]">
-            Hi Arjun — I'm your CardSense Benefit Concierge. I answer only from your issuers' <b>MITC documents</b>, <b>RBI/NPCI rules</b> and your <b>live card state</b>, with every rupee figure computed by the deterministic rule engine.
+            Hi Venki, I'm your CardSense Benefit Concierge. I answer only from your issuers' <b>MITC documents</b>, <b>RBI/NPCI rules</b> and your <b>live card state</b>, with every rupee figure computed by the deterministic rule engine.
           </div>
         </div>
 

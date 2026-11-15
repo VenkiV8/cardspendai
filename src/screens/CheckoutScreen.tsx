@@ -150,7 +150,7 @@ export function CheckoutScreen() {
                   <Sparkles size={13} className="text-[#00B9F1]" /> CardSense Pre-Swipe Check
                 </p>
                 <span className="flex items-center gap-1 rounded-full bg-[#002E6E] px-2 py-0.5 text-[9.5px] font-bold text-white">
-                  <Cpu size={10} /> {formatMs(decision.computeMs)} on-device match
+                  <Cpu size={10} /> {formatMs(decision.computeMs)} deterministic match
                 </span>
               </div>
 
@@ -193,7 +193,7 @@ export function CheckoutScreen() {
             <div className="my-1.5 border-t border-dashed border-slate-300" />
             <SummaryRow k="Total payable" v={formatINR(selected.payable)} bold />
             <details className="mt-1.5 text-[10.5px] text-slate-500">
-              <summary className="cursor-pointer font-semibold text-[#0089B3]">Why this card? (rule-engine math)</summary>
+              <summary className="cursor-pointer font-semibold text-[#0089B3]">Show rule-engine math</summary>
               <ul className="mt-1 space-y-0.5 pl-1">
                 {selected.lines.map((l) => (
                   <li key={l}>• {l}</li>

@@ -27,6 +27,13 @@ export default {
           '70%': { opacity: '1', transform: 'translateY(-6px) scale(1)' },
           '100%': { opacity: '0', transform: 'translateY(-18px) scale(1)' },
         },
+        slideIn: { '0%': { opacity: '0', transform: 'translateX(28px)' }, '100%': { opacity: '1', transform: 'translateX(0)' } },
+        // CardSense tile on the Paytm home screen: cyan glow pulse with a slight heartbeat scale.
+        tileBeat: {
+          '0%, 100%': { transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(0,185,241,0.55)' },
+          '50%': { transform: 'scale(1.06)', boxShadow: '0 0 18px 4px rgba(0,185,241,0.55)' },
+        },
+        tileRipple: { '0%': { transform: 'scale(1)', opacity: '0.7' }, '100%': { transform: 'scale(1.65)', opacity: '0' } },
         tourPulse: { '0%, 100%': { '--tw-ring-color': 'rgba(0,185,241,1)' }, '50%': { '--tw-ring-color': 'rgba(0,185,241,0.35)' } },
       },
       animation: {
@@ -35,6 +42,9 @@ export default {
         slideUp: 'slideUp 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both',
         pop: 'pop 420ms ease-out both',
         floatUp: 'floatUp 1800ms ease-out both',
+        slideIn: 'slideIn 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both',
+        tileBeat: 'tileBeat 1.6s ease-in-out infinite',
+        tileRipple: 'tileRipple 1.6s ease-out infinite',
         tourPulse: 'tourPulse 1.6s ease-in-out infinite',
       },
     },
